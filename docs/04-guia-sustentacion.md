@@ -14,16 +14,17 @@ Respuestas cortas, con el archivo exacto donde está la evidencia y la demostrac
 5. El pipeline elige el workspace desde la rama que recibió el merge y usa `concurrency` por ambiente;
    el rol OIDC de prod solo lo puede asumir un job del GitHub Environment `prod`.
 
-**Muestre versiones anteriores del tfstate de dev y cómo restauraría una.**
+**Muestre versiones anteriores del tfstate de dev y cómo restauraría una.** (todo en Floci)
 ```bash
-aws s3api list-object-versions --bucket "$BUCKET" --prefix "env:/dev/aegisvolt/platform.tfstate" \
-  --query 'Versions[].{v:VersionId,fecha:LastModified,actual:IsLatest}' --output table
+scripts/floci/terraform.sh dev versions
+# equivale a:
+aws --endpoint-url http://localhost:4566 s3api list-object-versions --bucket aegisvolt-tfstate \
+  --prefix "env:/dev/aegisvolt/platform.tfstate" --query 'Versions[].{v:VersionId,fecha:LastModified,actual:IsLatest}' --output table
 # restaurar: copiar la versión buena encima de la actual (queda como nueva versión; nada se pierde)
-aws s3api copy-object --bucket "$BUCKET" --key "env:/dev/aegisvolt/platform.tfstate" \
-  --copy-source "$BUCKET/env:/dev/aegisvolt/platform.tfstate?versionId=<VERSION_ID>"
-terraform workspace select dev && terraform plan   # verificar que el estado restaurado coincide con la realidad
+scripts/floci/terraform.sh dev restore <VERSION_ID>     # y luego revisa el plan que imprime
 ```
-Evidencia: `aws_s3_bucket_versioning` en `infra/terraform/bootstrap/main.tf` (+ regla de retención de 90 días).
+Evidencia: `aws_s3_bucket_versioning` en `infra/terraform/bootstrap/main.tf` (+ retención de 90 días);
+el CI de cada PR imprime el historial de versiones del workspace destino.
 
 **Recorrido de un paquete de API Gateway al pod.** Ver `docs/02-arquitectura.md#recorrido-de-un-paquete`.
 Intervienen: SG `vpclink` (egress solo al puerto del NLB), SG del NLB (ingress solo desde `vpclink`),
@@ -44,14 +45,16 @@ Reglas: `.github/rulesets/environment-branches.json` (`non_fast_forward`, `pull_
 
 **¿Cómo se determina el ambiente del `terraform apply` tras el merge?** `.github/workflows/cd.yml`: el
 evento es `push` a `dev|test|prod`; `github.ref_name` (la rama que recibió el merge) se valida contra la
-lista permitida y se usa en `environment:`, `terraform workspace select "$TARGET_ENV"` y
-`-var-file=environments/$TARGET_ENV.tfvars`.
+lista permitida y se usa en `environment:` y en `scripts/floci/terraform.sh "$TARGET_ENV" apply`, que
+hace `terraform workspace select -or-create "$TARGET_ENV"` y usa `-var-file=environments/$TARGET_ENV.tfvars`.
 
-**¿Qué métrica evalúa el canary antes de pasar del 20 % al 100 %?** `AnalysisTemplate canary-error-rate`
-(`deploy/helm/aegisvolt/templates/platform.yaml`): `ErrorCount` en CloudWatch (`AegisVolt/<env>`)
-filtrado por `Service` **y `Version` = tag de la imagen canary** (solo los errores de la versión nueva).
-3 mediciones de 60 s; se exige ≤ N errores/minuto (5 dev, 3 test, 1 prod). Si falla → Argo Rollouts
-aborta y todo el tráfico vuelve a la versión estable; el job `deploy-canary` queda en rojo.
+**¿Qué métrica evalúa el canary antes de pasar del 20 % al 100 %?** `AnalysisTemplate canary-error-rate-web`
+(`deploy/helm/aegisvolt/templates/platform.yaml`): consulta `/health/stats` a través del Service
+`<servicio>-canary`, que Argo Rollouts apunta **solo a los pods de la versión nueva**, y lee
+`errors_last_minute` (logs `ERROR` del último minuto). 3 mediciones cada 30 s; se exige ≤ N
+(5 dev, 3 test, 1 prod). Si falla → Argo Rollouts aborta y todo vuelve a la versión estable; el job
+`deploy-canary` queda en rojo. En AWS real existe la variante `canary-error-rate-cloudwatch`
+(métrica `ErrorCount` con dimensión `Version`).
 
 ## 6.3 SAGA y Feature Flags (25 %)
 
@@ -61,12 +64,12 @@ aborta y todo el tráfico vuelve a la versión estable; el job `deploy-canary` q
 2. Reservar carga → la línea de tiempo muestra: reserva ✔, retención ✔, activación ✖, reembolso ↩, bahía liberada ↩.
 3. DynamoDB:
 ```bash
-aws dynamodb get-item --table-name aegisvolt-billing-test --key '{"pk":{"S":"HOLD#<saga_id>"},"sk":{"S":"HOLD"}}'
+aws --endpoint-url http://localhost:4566 dynamodb get-item --table-name aegisvolt-billing-test --key '{"pk":{"S":"HOLD#<saga_id>"},"sk":{"S":"HOLD"}}'
 # status = RELEASED, release_reason = HARDWARE_FAULT_SIMULATED
-aws dynamodb query --table-name aegisvolt-billing-test --key-condition-expression "pk = :p AND begins_with(sk, :l)" \
+aws --endpoint-url http://localhost:4566 dynamodb query --table-name aegisvolt-billing-test --key-condition-expression "pk = :p AND begins_with(sk, :l)" \
   --expression-attribute-values '{":p":{"S":"WALLET#flota-andina"},":l":{"S":"LEDGER#"}}'
 # asientos HOLD y REFUND (evento de reversión)
-aws dynamodb get-item --table-name aegisvolt-reservations-test --key '{"pk":{"S":"RESERVATION#<saga_id>"},"sk":{"S":"RESERVATION"}}'
+aws --endpoint-url http://localhost:4566 dynamodb get-item --table-name aegisvolt-reservations-test --key '{"pk":{"S":"RESERVATION#<saga_id>"},"sk":{"S":"RESERVATION"}}'
 # status = RELEASED; el conector volvió a AVAILABLE
 ```
 

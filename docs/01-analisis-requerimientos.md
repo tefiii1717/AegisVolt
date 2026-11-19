@@ -117,20 +117,15 @@ alcance).
 
 ## 🟠 7. Costo y factibilidad de 3 ambientes con EKS en AWS real (2.4)
 
-Tres clústeres EKS (el plano de control cuesta del orden de US$0.10/h cada uno), nodos, NAT
-Gateways e Interface VPCEs por AZ y por ambiente, durante 14 días, es caro para un proyecto
-individual. Si se usa una cuenta de **AWS Academy Learner Lab**, además no se pueden crear roles IAM
-(hay que reutilizar `LabRole`), lo que impide IRSA/OIDC.
+Tres clústeres EKS, nodos, NAT Gateways e Interface VPCEs por AZ y por ambiente durante 14 días es
+caro para un proyecto individual, y una cuenta de AWS Academy no permite crear roles IAM.
 
-**Decisión:**
-
-- Terraform soporta **los tres ambientes completos**, pero con interruptores
-  (`enable_eks`, `enable_interface_endpoints`, `nat_mode = "none" | "single"`).
-- Sin NAT: los nodos salen a ECR/S3/STS/Logs **por VPC Endpoints** (refuerza el requisito de tráfico
-  privado y ahorra el NAT).
-- `dev` y `test` corren sobre **Floci** (emulador MIT con DynamoDB, S3, API Gateway v2, Cognito y EKS
-  respaldado por k3s); `prod` en AWS real solo durante la demo y luego `terraform destroy`.
-- Variable `existing_iam_role_arn` para cuentas sin permiso de crear roles.
+**Decisión: los tres ambientes corren en Floci** (la especificación lo permite: "AWS real o entornos
+compatibles como Floci"). Terraform apunta a Floci por defecto (`use_floci = true`), incluido un
+**EKS emulado con k3s**; el código para AWS real se conserva (`use_floci = false`). El pipeline
+verifica el IaC aplicándolo en un Floci efímero en cada PR (ver [05 · Floci](05-floci-local.md)).
+Aplicarlo en Floci destapó un error que también habría fallado en AWS (metric filters con
+dimensiones no aceptan `default_value`).
 
 ## 🟠 8. "Uso exclusivo de DynamoDB" vs. Prefect y Kafka (2.4 / 2.5)
 
@@ -162,7 +157,7 @@ bloqueo nativo de estado en S3 (`use_lockfile = true`) y re-plan dentro del job 
 
 | Requisito | Dónde vive | Cuidado clave |
 |---|---|---|
-| Kafka (EDA) | Strimzi (KRaft) en EKS · `apache/kafka` en Compose · Redpanda vía Floci | Clave de partición = `saga_id` (orden por SAGA) |
+| Kafka (EDA) | Strimzi (KRaft) en el EKS emulado · `apache/kafka` en Compose | Clave de partición = `saga_id` (orden por SAGA) |
 | Transactional Outbox | Cada servicio escribe estado + mensaje en **una** `TransactWriteItems`; un *relay* publica | Entrega *at-least-once* → consumidores idempotentes |
 | ACL con Kafka Streams | `acl-ocpp-translator` (Java) traduce OCPP 1.6 del legado al modelo de dominio | Mensajes inválidos → *dead-letter topic* |
 | Strangler Fig | `legacy-csms` (sistema heredado) + flag `STRANGLER_ROUTE_STATIONS_TO_CORE` en el BFF | Migración gradual sin *big bang* |

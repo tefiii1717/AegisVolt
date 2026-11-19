@@ -14,6 +14,7 @@ iniciar. Si algo falla, una **SAGA orquestada** reembolsa y libera la bahía aut
 | [02 · Arquitectura](docs/02-arquitectura.md) | Bounded contexts, SAGA, CQRS, Strangler Fig, red, decisiones |
 | [03 · Design Thinking](docs/03-design-thinking.md) | Personas, punto de vista, ideación, pruebas |
 | [04 · Guía de sustentación](docs/04-guia-sustentacion.md) | Respuestas y demos para cada pregunta del banco §6 |
+| [05 · Floci](docs/05-floci-local.md) | Los tres ambientes en el emulador local, CI/CD y diferencias con AWS |
 
 ## Estructura
 
@@ -66,20 +67,18 @@ pytest                                                    # librería + SAGA com
 E2E_BFF_URL=http://localhost:4000 pytest -m e2e tests/e2e -o addopts=""   # con el stack de Compose arriba
 ```
 
-## Infraestructura
+## Infraestructura (Floci, sin cuenta de AWS)
 
 ```bash
-# 1. Una sola vez: bucket de estado versionado, ECR y roles OIDC
-cd infra/terraform/bootstrap && terraform init && terraform apply
-
-# 2. Por ambiente (lo hace el pipeline al fusionar en dev/test/prod)
-cd infra/terraform/envs
-terraform init -backend-config=backend/aws.hcl
-terraform workspace select -or-create dev
-terraform plan -var-file=environments/dev.tfvars
+scripts/floci/terraform.sh up            # Floci persistente en :4566
+scripts/floci/terraform.sh bootstrap     # bucket de estado versionado + tabla de bloqueo
+scripts/floci/terraform.sh dev apply     # workspace dev (también test y prod)
+scripts/floci/terraform.sh dev versions  # historial del tfstate
+scripts/floci/k8s-platform.sh dev        # EKS emulado (k3s) + Argo Rollouts, ingress-nginx, Strimzi
 ```
 
-Con Floci: `terraform init -backend-config=backend/floci.hcl` y `-var-file=environments/floci.tfvars`.
+Guía completa en [05 · Floci](docs/05-floci-local.md). El código para AWS real se conserva
+(`use_floci = false`, `backend/aws.hcl`).
 
 ## Flujo de ramas
 
