@@ -32,31 +32,70 @@ resource "aws_iam_role" "service" {
   assume_role_policy = each.value.json
 }
 
+data "aws_iam_policy_document" "service" {
+  for_each = aws_iam_role.service
+
+  # Tabla propia: lectura/escritura (incluye el GSI del outbox).
+  dynamic "statement" {
+    for_each = lookup(local.service_tables, each.key, [])
+    content {
+      sid = "OwnTable${replace(title(statement.value), "-", "")}"
+      actions = [
+        "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query", "dynamodb:Scan",
+        "dynamodb:TransactWriteItems", "dynamodb:DescribeTable", "dynamodb:ConditionCheckItem",
+      ]
+      resources = [module.dynamodb.table_arns[statement.value], "${module.dynamodb.table_arns[statement.value]}/index/*"]
+    }
+  }
+
+  # Flags: solo lectura (las escribe exclusivamente la Lambda flags-admin).
+  statement {
+    sid       = "ReadFeatureFlags"
+    actions   = ["dynamodb:Scan", "dynamodb:GetItem"]
+    resources = [module.dynamodb.table_arns["flags"]]
+  }
+
+  # Prefect audita (solo lectura) retenciones y reservas, y publica métricas propias.
+  dynamic "statement" {
+    for_each = each.key == "prefect-flows" ? [1] : []
+    content {
+      sid       = "AuditSagaTables"
+      actions   = ["dynamodb:Scan", "dynamodb:Query"]
+      resources = [module.dynamodb.table_arns["billing"], module.dynamodb.table_arns["reservations"]]
+    }
+  }
+  dynamic "statement" {
+    for_each = each.key == "prefect-flows" ? [1] : []
+    content {
+      sid       = "PublishSagaMetrics"
+      actions   = ["cloudwatch:PutMetricData"]
+      resources = ["*"]
+      condition {
+        test     = "StringEquals"
+        variable = "cloudwatch:namespace"
+        values   = ["AegisVolt/Saga"]
+      }
+    }
+  }
+
+  # Sidecar Fluent Bit: escribir en /aegisvolt/<env>/*.
+  statement {
+    sid       = "SidecarLogs"
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
+    resources = ["arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:/aegisvolt/${local.env}/*"]
+  }
+
+  statement {
+    sid       = "UseEnvironmentKey"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
+    resources = [aws_kms_key.env.arn]
+  }
+}
+
 resource "aws_iam_role_policy" "service" {
   for_each = aws_iam_role.service
   role     = each.value.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = concat(
-      # tabla propia: lectura/escritura (incluye el GSI del outbox)
-      [for t in lookup(local.service_tables, each.key, []) : {
-        Effect   = "Allow"
-        Action   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:TransactWriteItems", "dynamodb:DescribeTable", "dynamodb:ConditionCheckItem"]
-        Resource = [module.dynamodb.table_arns[t], "${module.dynamodb.table_arns[t]}/index/*"]
-      }],
-      # flags: solo lectura (las escribe exclusivamente la Lambda flags-admin)
-      [{ Effect = "Allow", Action = ["dynamodb:Scan", "dynamodb:GetItem"], Resource = module.dynamodb.table_arns["flags"] }],
-      # Prefect audita (solo lectura) holds y reservas, y publica métricas
-      each.key == "prefect-flows" ? [
-        { Effect = "Allow", Action = ["dynamodb:Scan", "dynamodb:Query"], Resource = [module.dynamodb.table_arns["billing"], module.dynamodb.table_arns["reservations"]] },
-        { Effect = "Allow", Action = ["cloudwatch:PutMetricData"], Resource = "*", Condition = { StringEquals = { "cloudwatch:namespace" = "AegisVolt/Saga" } } },
-      ] : [],
-      # sidecar Fluent Bit: escribir en su grupo /aegisvolt/<env>/<servicio>
-      [{ Effect = "Allow", Action = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"],
-      Resource = "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:/aegisvolt/${local.env}/*" }],
-      [{ Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.env.arn }],
-    )
-  })
+  policy   = data.aws_iam_policy_document.service[each.key].json
 }
 
 # Rol del AWS Load Balancer Controller (TargetGroupBinding hacia el NLB que crea Terraform).
