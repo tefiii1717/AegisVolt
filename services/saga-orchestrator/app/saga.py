@@ -15,13 +15,13 @@ Las compensaciones van en orden inverso: primero billing (reembolso), luego rese
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from aegis_common import topics
 
 
-class SagaState(str, Enum):
+class SagaState(StrEnum):
     RESERVING = "RESERVING"
     AUTHORIZING_FUNDS = "AUTHORIZING_FUNDS"
     STARTING_CHARGE = "STARTING_CHARGE"

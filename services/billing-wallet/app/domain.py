@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, time
 from decimal import ROUND_CEILING, Decimal
-from enum import Enum
+from enum import StrEnum
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,7 +15,7 @@ SURGE_MULTIPLIER = 1.35
 ULTRA_PREMIUM = 1.15
 
 
-class HoldStatus(str, Enum):
+class HoldStatus(StrEnum):
     HELD = "HELD"
     CAPTURED = "CAPTURED"
     RELEASED = "RELEASED"

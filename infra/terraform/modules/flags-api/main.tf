@@ -43,8 +43,14 @@ resource "aws_iam_role_policy" "lambda" {
       { Effect = "Allow", Action = ["dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Scan"], Resource = var.flags_table_arn },
       { Effect = "Allow", Action = ["logs:CreateLogStream", "logs:PutLogEvents"], Resource = "${aws_cloudwatch_log_group.lambda.arn}:*" },
       { Effect = "Allow", Action = ["kms:Decrypt"], Resource = var.kms_key_arn != null ? var.kms_key_arn : "*" },
-      { Effect   = "Allow", Action = ["ec2:CreateNetworkInterface", "ec2:DescribeNetworkInterfaces", "ec2:DeleteNetworkInterface",
-        "ec2:AssignPrivateIpAddresses", "ec2:UnassignPrivateIpAddresses"], Resource = "*" },
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateNetworkInterface", "ec2:DescribeNetworkInterfaces", "ec2:DeleteNetworkInterface",
+          "ec2:AssignPrivateIpAddresses", "ec2:UnassignPrivateIpAddresses",
+        ]
+        Resource = "*"
+      },
     ]
   })
 }
@@ -199,8 +205,14 @@ resource "aws_api_gateway_stage" "ops" {
   xray_tracing_enabled = true
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.access.arn
-    format = jsonencode({ requestId = "$context.requestId", sourceVpce = "$context.identity.vpceId",
-    path = "$context.path", method = "$context.httpMethod", status = "$context.status", correlation_id = "$context.requestId" })
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      sourceVpce     = "$context.identity.vpceId"
+      path           = "$context.path"
+      method         = "$context.httpMethod"
+      status         = "$context.status"
+      correlation_id = "$context.requestId"
+    })
   }
 }
 

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class SessionStatus(str, Enum):
+class SessionStatus(StrEnum):
     ACTIVE = "ACTIVE"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"   # también actúa como lápida si la cancelación llega antes del inicio

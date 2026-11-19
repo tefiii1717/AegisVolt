@@ -93,12 +93,12 @@ jobs:
       - name: Lógica de negocio y máquina de estados de la SAGA
         run: |
           for svc in saga-orchestrator billing-wallet; do
-            (cd "services/$svc" && pytest -q -p no:cacheprovider --rootdir . tests)
+            (cd "services/$svc" && python -m pytest -q -p no:cacheprovider --rootdir . tests)
           done
       - name: Lambda flags-admin y reglas de auditoría de Prefect
         run: |
-          (cd serverless/flags-admin && pytest -q -p no:cacheprovider --rootdir . test_handler.py)
-          (cd observability/prefect && pytest -q -p no:cacheprovider --rootdir . test_audit.py)
+          (cd serverless/flags-admin && python -m pytest -q -p no:cacheprovider --rootdir . test_handler.py)
+          (cd observability/prefect && python -m pytest -q -p no:cacheprovider --rootdir . test_audit.py)
       - name: BFF GraphQL (auth/scopes, ACL del legado)
         working-directory: gateway/graphql-bff
         run: npm ci && npm test

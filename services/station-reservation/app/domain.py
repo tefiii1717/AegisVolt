@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class ConnectorStatus(str, Enum):
+class ConnectorStatus(StrEnum):
     AVAILABLE = "AVAILABLE"
     RESERVED = "RESERVED"
     CHARGING = "CHARGING"
     OUT_OF_SERVICE = "OUT_OF_SERVICE"
 
 
-class ReservationStatus(str, Enum):
+class ReservationStatus(StrEnum):
     ACTIVE = "ACTIVE"
     CHARGING = "CHARGING"
     RELEASED = "RELEASED"
@@ -23,7 +23,7 @@ class ReservationStatus(str, Enum):
     FINISHED = "FINISHED"
 
 
-class Tier(str, Enum):
+class Tier(StrEnum):
     FAST = "FAST"     # <= 120 kW
     ULTRA = "ULTRA"   # >= 150 kW, requiere ENABLE_FAST_CHARGE_BOOST
 

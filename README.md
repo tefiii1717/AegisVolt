@@ -59,8 +59,8 @@ Demos rápidas:
 ```bash
 pip install -e "libs/aegis-common[test]"
 pytest                                                    # librería + SAGA completa en proceso (moto)
-(cd services/saga-orchestrator && pytest -q --rootdir . tests)
-(cd services/billing-wallet && pytest -q --rootdir . tests)
+(cd services/saga-orchestrator && python -m pytest -q --rootdir . tests)
+(cd services/billing-wallet && python -m pytest -q --rootdir . tests)
 (cd gateway/graphql-bff && npm ci && npm test)
 (cd streams/acl-ocpp-translator && mvn test)
 E2E_BFF_URL=http://localhost:4000 pytest -m e2e tests/e2e -o addopts=""   # con el stack de Compose arriba

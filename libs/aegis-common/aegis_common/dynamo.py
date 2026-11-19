@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import boto3
@@ -78,7 +78,7 @@ def ttl_epoch(days: int = DEFAULT_TTL_DAYS) -> int:
     return int(time.time()) + days * 86400
 
 
-class TxnOutcome(str, Enum):
+class TxnOutcome(StrEnum):
     APPLIED = "APPLIED"
     DUPLICATE = "DUPLICATE"
 

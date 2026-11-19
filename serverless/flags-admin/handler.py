@@ -38,7 +38,8 @@ def table():
     global _table
     if _table is None:
         endpoint = os.environ.get("DYNAMODB_ENDPOINT") or None
-        _table = boto3.resource("dynamodb", endpoint_url=endpoint).Table(TABLE)
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+        _table = boto3.resource("dynamodb", region_name=region, endpoint_url=endpoint).Table(TABLE)
     return _table
 
 
