@@ -123,6 +123,7 @@ resource "aws_iam_role" "flow" {
   assume_role_policy = data.aws_iam_policy_document.flow_assume.json
 }
 
+#tfsec:ignore:aws-iam-no-policy-wildcards El sufijo ":*" (log streams del grupo) es obligatorio para Flow Logs; el grupo está fijado.
 resource "aws_iam_role_policy" "flow" {
   count = var.create_iam ? 1 : 0
   role  = aws_iam_role.flow[0].id

@@ -88,19 +88,21 @@ module "observability" {
 }
 
 module "flags_api" {
-  source                = "../modules/flags-api"
-  count                 = var.enable_interface_endpoints ? 1 : 0
-  environment           = local.env
-  vpc_id                = module.network.vpc_id
-  private_subnet_ids    = module.network.private_subnet_ids
-  execute_api_vpce_id   = module.endpoints.execute_api_endpoint_id
-  flags_table_name      = module.dynamodb.table_names["flags"]
-  flags_table_arn       = module.dynamodb.table_arns["flags"]
-  handler_path          = "${path.module}/../../../serverless/flags-admin/handler.py"
-  log_retention_days    = local.s.log_retention
-  kms_key_arn           = aws_kms_key.env.arn
-  create_iam            = var.create_iam
-  existing_iam_role_arn = var.existing_iam_role_arn
+  source                  = "../modules/flags-api"
+  count                   = var.enable_interface_endpoints ? 1 : 0
+  environment             = local.env
+  vpc_id                  = module.network.vpc_id
+  vpc_cidr                = module.network.vpc_cidr
+  dynamodb_prefix_list_id = module.endpoints.dynamodb_prefix_list_id
+  private_subnet_ids      = module.network.private_subnet_ids
+  execute_api_vpce_id     = module.endpoints.execute_api_endpoint_id
+  flags_table_name        = module.dynamodb.table_names["flags"]
+  flags_table_arn         = module.dynamodb.table_arns["flags"]
+  handler_path            = "${path.module}/../../../serverless/flags-admin/handler.py"
+  log_retention_days      = local.s.log_retention
+  kms_key_arn             = aws_kms_key.env.arn
+  create_iam              = var.create_iam
+  existing_iam_role_arn   = var.existing_iam_role_arn
 }
 
 module "edge_api" {

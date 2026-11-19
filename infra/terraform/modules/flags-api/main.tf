@@ -34,6 +34,7 @@ resource "aws_iam_role" "lambda" {
   assume_role_policy = data.aws_iam_policy_document.assume.json
 }
 
+#tfsec:ignore:aws-iam-no-policy-wildcards Las acciones ec2:*NetworkInterface de Lambda en VPC no admiten recursos específicos.
 resource "aws_iam_role_policy" "lambda" {
   count = var.create_iam ? 1 : 0
   role  = aws_iam_role.lambda[0].id
@@ -60,11 +61,18 @@ resource "aws_security_group" "lambda" {
   description = "Lambda flags-admin: solo salida HTTPS dentro de la VPC (VPCE)"
   vpc_id      = var.vpc_id
   egress {
-    description = "HTTPS hacia VPC Endpoints y prefix list de DynamoDB"
+    description = "HTTPS hacia los Interface VPC Endpoints de la VPC"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # sin NAT no hay ruta a Internet: solo alcanza VPCE / prefix lists
+    cidr_blocks = [var.vpc_cidr]
+  }
+  egress {
+    description     = "HTTPS hacia DynamoDB por el Gateway VPC Endpoint (prefix list)"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    prefix_list_ids = [var.dynamodb_prefix_list_id]
   }
 }
 

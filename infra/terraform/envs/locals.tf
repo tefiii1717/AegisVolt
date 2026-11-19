@@ -9,7 +9,7 @@ locals {
       az_count            = 2
       log_retention       = 30
       deletion_protection = false
-      pitr                = false
+      pitr                = true
       nodes = {
         types    = ["t3.large"]
         capacity = "SPOT"

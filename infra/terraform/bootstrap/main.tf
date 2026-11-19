@@ -27,6 +27,7 @@ locals {
 }
 
 # ---------------- S3: estado remoto ----------------
+#tfsec:ignore:aws-s3-enable-bucket-logging Auditoría por CloudTrail data events (ver comentario de Checkov).
 resource "aws_s3_bucket" "state" {
   #checkov:skip=CKV_AWS_144:Los backups del estado se resuelven con versionamiento; la replicación entre regiones excede el alcance.
   #checkov:skip=CKV_AWS_18:Auditoría de acceso cubierta por CloudTrail data events; no se crea un segundo bucket de logs.
@@ -40,6 +41,7 @@ resource "aws_s3_bucket_versioning" "state" {
   versioning_configuration { status = "Enabled" } # cada apply deja una versión restaurable del tfstate
 }
 
+#tfsec:ignore:aws-s3-encryption-customer-key SSE-KMS con la llave administrada aws/s3; una CMK propia se puede agregar sin cambiar el diseño.
 resource "aws_s3_bucket_server_side_encryption_configuration" "state" {
   bucket = aws_s3_bucket.state.id
   rule {
@@ -99,6 +101,7 @@ resource "aws_s3_bucket_policy" "state" {
 }
 
 # ---------------- ECR compartido ----------------
+#tfsec:ignore:aws-ecr-repository-customer-key Cifrado KMS con la llave administrada de ECR.
 resource "aws_ecr_repository" "service" {
   for_each             = toset(local.services)
   name                 = "aegisvolt/${each.key}"
@@ -197,6 +200,7 @@ resource "aws_iam_role_policy_attachment" "plan_readonly" {
   policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
+#tfsec:ignore:aws-iam-no-policy-wildcards Los archivos .tflock existen por workspace (env:/<ws>/...); el comodín está acotado a *.tflock del bucket de estado.
 resource "aws_iam_role_policy" "plan_state_lock" {
   count = var.create_github_oidc ? 1 : 0
   role  = aws_iam_role.plan[0].id

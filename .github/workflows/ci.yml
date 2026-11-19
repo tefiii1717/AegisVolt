@@ -149,7 +149,7 @@ jobs:
           done
       - name: tfsec
         uses: aquasecurity/tfsec-action@b466648d6e39e7c75324f25d83891162a721f2d6 # v1.0.3
-        with: { working_directory: infra/terraform, soft_fail: false }
+        with: { working_directory: infra/terraform, soft_fail: false, additional_args: "--exclude-downloaded-modules" }
       - name: Checkov
         uses: bridgecrewio/checkov-action@b4906742988cd6ad3ca39d53c5eecc681f2010c4 # v12.2919.0
         with: { directory: infra/terraform, framework: terraform, quiet: true, download_external_modules: false }
