@@ -11,7 +11,9 @@ global:
   cognitoIssuer: ""
   cognitoClientIds: ""
   corsOrigins: ""
+  awsEndpoint: ""            # Floci visto desde el clúster (p. ej. http://host.k3d.internal:4566); vacío = AWS real
   canary:
+    provider: web            # web (Floci y AWS) | cloudwatch (solo AWS real)
     weight: 20               # % de tráfico (BFF) o de réplicas (consumidores Kafka) en la versión nueva
     pauseSeconds: 60
     maxErrors: 2             # errores tolerados de la versión canary por minuto (CloudWatch)

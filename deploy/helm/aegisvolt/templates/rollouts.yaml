@@ -10,9 +10,11 @@ kind: ServiceAccount
 metadata:
   name: {{ $name }}
   labels: {{- include "aegis.labels" $ctx | nindent 4 }}
+  {{- if not $g.awsEndpoint }}
   annotations:
-    # IRSA: rol IAM propio por servicio (solo su tabla DynamoDB). Lo crea Terraform.
+    # IRSA: rol IAM propio por servicio (solo su tabla DynamoDB). Lo crea Terraform (solo AWS real).
     eks.amazonaws.com/role-arn: arn:aws:iam::{{ $g.accountId }}:role/aegisvolt-{{ $g.environment }}-{{ $name }}
+  {{- end }}
 automountServiceAccountToken: true
 ---
 apiVersion: v1
@@ -24,9 +26,9 @@ spec:
   type: ClusterIP
   selector: {{- include "aegis.selector" $ctx | nindent 4 }}
   ports: [{ name: http, port: {{ $port }}, targetPort: http }]
-{{- if $svc.trafficRouting }}
 ---
-# Service del canary: ingress-nginx envía aquí el peso configurado (20 %) durante el rollout.
+# Service del canary: Argo Rollouts lo apunta SOLO a los pods de la versión nueva.
+# Lo usan ingress-nginx (peso exacto del BFF) y el análisis (consulta /health/stats del canary).
 apiVersion: v1
 kind: Service
 metadata:
@@ -36,7 +38,6 @@ spec:
   type: ClusterIP
   selector: {{- include "aegis.selector" $ctx | nindent 4 }}
   ports: [{ name: http, port: {{ $port }}, targetPort: http }]
-{{- end }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -63,9 +64,9 @@ spec:
       steps: []                     # sistema heredado: reemplazo directo
     {{- else }}
     canary:
-      {{- if $svc.trafficRouting }}
       stableService: {{ $name }}
       canaryService: {{ $name }}-canary
+      {{- if $svc.trafficRouting }}
       trafficRouting:
         nginx:
           stableIngress: {{ $name }}
@@ -76,9 +77,10 @@ spec:
         - setWeight: {{ $g.canary.weight }}
         - pause: { duration: {{ $g.canary.pauseSeconds }} }
         - analysis:
-            templates: [{ templateName: canary-error-rate }]
+            templates: [{ templateName: canary-error-rate-{{ $g.canary.provider }} }]
             args:
               - { name: service, value: {{ $svc.serviceName }} }
+              - { name: canary-url, value: "http://{{ $name }}-canary:{{ $port }}/health/stats" }
               - { name: version, value: {{ $tag | quote }} }
         - setWeight: 100
       # Si el análisis falla: abort → todo el tráfico vuelve a la versión estable (rollback automático).
@@ -110,10 +112,16 @@ spec:
             - { name: LOG_GROUP, value: "/aegisvolt/{{ $g.environment }}/{{ $svc.serviceName }}" }
             - { name: AWS_REGION, value: {{ $g.region }} }
             - { name: POD_NAME, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+            {{- if $g.awsEndpoint }}
+            - { name: DYNAMODB_ENDPOINT, value: {{ $g.awsEndpoint | quote }} }
+            - { name: AWS_ENDPOINT_URL, value: {{ $g.awsEndpoint | quote }} }
+            - { name: AWS_ACCESS_KEY_ID, value: test }
+            - { name: AWS_SECRET_ACCESS_KEY, value: test }
+            {{- end }}
           volumeMounts:
             - { name: logs, mountPath: /var/log/aegis, readOnly: true }
             - { name: fluent-bit-config, mountPath: /fluent-bit/etc/aegis }
-          args: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/aegis/fluent-bit.conf"]
+          args: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/aegis/{{ ternary "fluent-bit-floci.conf" "fluent-bit.conf" (ne $g.awsEndpoint "") }}"]
           resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 100m, memory: 64Mi } }
           securityContext: {{- include "aegis.securityContext" $ctx | nindent 12 }}
         {{- if $svc.outbox }}
@@ -129,6 +137,12 @@ spec:
             - { name: TABLE_NAME, value: "aegisvolt-{{ $svc.table }}-{{ $g.environment }}" }
             - { name: KAFKA_BOOTSTRAP, value: {{ $g.kafkaBootstrap }} }
             - { name: LOG_FILE, value: /var/log/aegis/outbox.log }
+            {{- if $g.awsEndpoint }}
+            - { name: DYNAMODB_ENDPOINT, value: {{ $g.awsEndpoint | quote }} }
+            - { name: AWS_ENDPOINT_URL, value: {{ $g.awsEndpoint | quote }} }
+            - { name: AWS_ACCESS_KEY_ID, value: test }
+            - { name: AWS_SECRET_ACCESS_KEY, value: test }
+            {{- end }}
           volumeMounts: [{ name: logs, mountPath: /var/log/aegis }]
           resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 200m, memory: 128Mi } }
           securityContext: {{- include "aegis.securityContext" $ctx | nindent 12 }}
@@ -145,6 +159,12 @@ spec:
             - { name: KAFKA_BOOTSTRAP, value: {{ $g.kafkaBootstrap }} }
             - { name: FLAGS_TABLE, value: "aegisvolt-feature-flags-{{ $g.environment }}" }
             - { name: LOG_FILE, value: /var/log/aegis/app.log }
+            {{- if $g.awsEndpoint }}
+            - { name: DYNAMODB_ENDPOINT, value: {{ $g.awsEndpoint | quote }} }
+            - { name: AWS_ENDPOINT_URL, value: {{ $g.awsEndpoint | quote }} }
+            - { name: AWS_ACCESS_KEY_ID, value: test }
+            - { name: AWS_SECRET_ACCESS_KEY, value: test }
+            {{- end }}
             {{- if $svc.table }}
             - { name: TABLE_NAME, value: "aegisvolt-{{ $svc.table }}-{{ $g.environment }}" }
             - { name: OUTBOX_RELAY_MODE, value: {{ ternary "sidecar" "off" (default false $svc.outbox) }} }

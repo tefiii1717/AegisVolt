@@ -45,11 +45,34 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(doc, default=str, ensure_ascii=False)
 
 
+class ErrorRateCounter(logging.Handler):
+    """Cuenta logs ERROR en una ventana deslizante de 60 s. Lo consulta el análisis del canary
+    (Argo Rollouts, proveedor web) en /health/stats de los pods de la versión nueva."""
+
+    def __init__(self, window_s: float = 60.0) -> None:
+        super().__init__(level=logging.ERROR)
+        self.window_s = window_s
+        self._events: list[float] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._events.append(record.created)
+
+    def per_window(self) -> int:
+        import time
+
+        cutoff = time.time() - self.window_s
+        self._events = [t for t in self._events if t >= cutoff]
+        return len(self._events)
+
+
+error_rate = ErrorRateCounter()
+
+
 def configure_logging(service: str, environment: str, level: str = "INFO") -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter(service, environment))
     root = logging.getLogger()
-    root.handlers[:] = [handler]
+    root.handlers[:] = [handler, error_rate]
     # Patrón Sidecar: si LOG_FILE está definido, las mismas líneas JSON se escriben en un volumen
     # compartido (emptyDir) que el contenedor Fluent Bit del pod envía a CloudWatch.
     log_file = os.getenv("LOG_FILE")

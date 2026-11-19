@@ -20,7 +20,7 @@ from .circuit_breaker import CircuitBreaker
 from .config import ServiceSettings
 from .dynamo import make_client
 from .flags import FeatureFlags
-from .logs import configure_logging, correlation_id_var
+from .logs import configure_logging, correlation_id_var, error_rate
 from .outbox import OutboxRelay
 
 log = logging.getLogger("aegis.runtime")
@@ -107,6 +107,11 @@ class ServiceRuntime:
                 checks["kafka_consumer"] = "UP" if self.subscriber.healthy else "DOWN"
             ok = all(v == "UP" for v in checks.values())
             return JSONResponse({"status": "UP" if ok else "DOWN", "checks": checks}, status_code=200 if ok else 503)
+
+        @app.get("/health/stats", include_in_schema=False)
+        async def stats() -> dict:
+            """Métrica del análisis canary: errores del último minuto de ESTE pod (y su versión)."""
+            return {"service": s.service_name, "version": app.version, "errors_last_minute": error_rate.per_window()}
 
         @app.get("/health", include_in_schema=False)
         async def details() -> dict:

@@ -136,3 +136,10 @@ module "eks" {
   create_iam            = var.create_iam
   existing_iam_role_arn = var.existing_iam_role_arn
 }
+
+module "eks_floci" {
+  source             = "../modules/eks-floci"
+  count              = var.enable_eks && var.use_floci ? 1 : 0
+  environment        = local.env
+  private_subnet_ids = module.network.private_subnet_ids
+}

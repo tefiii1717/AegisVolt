@@ -1,5 +1,6 @@
 # Logs estructurados por ambiente: /aegisvolt/<env>/<servicio>
-# Métrica de errores por servicio (filtro JSON level=ERROR): la usa el AnalysisTemplate del canary.
+# Métrica de errores por servicio (filtro JSON level=ERROR).
+# Nota: CloudWatch no admite default_value en filtros con dimensiones (lo detectó el apply en Floci).
 
 resource "aws_cloudwatch_log_group" "service" {
   for_each          = toset(var.services)
@@ -14,11 +15,10 @@ resource "aws_cloudwatch_log_metric_filter" "errors" {
   log_group_name = each.value.name
   pattern        = "{ $.level = \"ERROR\" }"
   metric_transformation {
-    name          = "ErrorCount"
-    namespace     = "AegisVolt/${var.environment}"
-    value         = "1"
-    default_value = "0"
-    dimensions    = { Service = "$.service", Version = "$.version" }
+    name       = "ErrorCount"
+    namespace  = "AegisVolt/${var.environment}"
+    value      = "1"
+    dimensions = { Service = "$.service", Version = "$.version" }
   }
 }
 
@@ -28,11 +28,10 @@ resource "aws_cloudwatch_log_metric_filter" "errors_total" {
   log_group_name = each.value.name
   pattern        = "{ $.level = \"ERROR\" }"
   metric_transformation {
-    name          = "ErrorCountTotal"
-    namespace     = "AegisVolt/${var.environment}"
-    value         = "1"
-    default_value = "0"
-    dimensions    = { Service = "$.service" }
+    name       = "ErrorCountTotal"
+    namespace  = "AegisVolt/${var.environment}"
+    value      = "1"
+    dimensions = { Service = "$.service" }
   }
 }
 
@@ -42,11 +41,10 @@ resource "aws_cloudwatch_log_metric_filter" "requests" {
   log_group_name = each.value.name
   pattern        = "{ $.message = \"http\" }"
   metric_transformation {
-    name          = "RequestCount"
-    namespace     = "AegisVolt/${var.environment}"
-    value         = "1"
-    default_value = "0"
-    dimensions    = { Service = "$.service", Version = "$.version" }
+    name       = "RequestCount"
+    namespace  = "AegisVolt/${var.environment}"
+    value      = "1"
+    dimensions = { Service = "$.service", Version = "$.version" }
   }
 }
 

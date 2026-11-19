@@ -1,8 +1,13 @@
-# CD post-merge: al fusionar un PR en dev, test o prod se despliega SOLO ese ambiente.
+# CD post-merge: al fusionar un PR en dev, test o prod se despliega SOLO ese ambiente, en Floci.
 #
 # Detección dinámica del ambiente: github.ref_name es la rama que recibió el merge
-# (refs/heads/test → "test"). Ese valor elige: el GitHub Environment (aprobaciones y rol OIDC),
-# el workspace de Terraform y los values de Helm.
+# (refs/heads/test → "test"). Ese valor elige el GitHub Environment, el workspace de Terraform
+# y los values de Helm.
+#
+# ¿Dónde corre? Variable de repositorio DEPLOY_RUNS_ON:
+#   - sin definir → "ubuntu-latest": Floci efímero (sirve como verificación; el estado no persiste).
+#   - '["self-hosted","floci"]' → runner propio (WSL2) con Floci persistente y un clúster local:
+#     los ambientes y el historial del tfstate quedan vivos para la demo (ver docs/05-floci-local.md).
 name: cd
 
 on:
@@ -12,7 +17,7 @@ on:
 permissions:
   contents: read
 
-# Nunca dos despliegues simultáneos al mismo ambiente (el estado de Terraform además tiene lock en S3).
+# Nunca dos despliegues simultáneos al mismo ambiente (el estado además tiene lock en DynamoDB).
 concurrency:
   group: deploy-${{ github.ref_name }}
   cancel-in-progress: false
@@ -33,70 +38,47 @@ jobs:
   terraform-apply:
     name: terraform-apply
     needs: resolve
-    runs-on: ubuntu-latest
-    environment: ${{ needs.resolve.outputs.env }}   # prod exige revisor en el GitHub Environment
-    permissions: { contents: read, id-token: write }
+    runs-on: ${{ fromJSON(vars.DEPLOY_RUNS_ON || '"ubuntu-latest"') }}
+    environment: ${{ needs.resolve.outputs.env }}   # prod puede exigir revisor en el GitHub Environment
     env:
       TARGET_ENV: ${{ needs.resolve.outputs.env }}
-    outputs:
-      tg_arn: ${{ steps.out.outputs.tg_arn }}
-      flags_url: ${{ steps.out.outputs.flags_url }}
-      issuer: ${{ steps.out.outputs.issuer }}
-      client_id: ${{ steps.out.outputs.client_id }}
-      cluster: ${{ steps.out.outputs.cluster }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with: { terraform_version: "1.10.5", terraform_wrapper: false }
-      - uses: aws-actions/configure-aws-credentials@5579c002bb4778aa43395ef1df492868a9a1c83f # v4.0.2
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}   # variable definida en cada GitHub Environment
-          aws-region: ${{ vars.AWS_REGION }}
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with: { python-version: "3.12" }
+      - name: Floci arriba (persistente en runner propio)
+        run: scripts/floci/terraform.sh up
+      - name: Bootstrap del estado (idempotente)
+        run: scripts/floci/terraform.sh bootstrap
       - name: terraform apply en el workspace detectado
-        working-directory: infra/terraform/envs
+        run: |
+          echo "Aplicando SOLO el ambiente: $TARGET_ENV"
+          scripts/floci/terraform.sh "$TARGET_ENV" apply
+      - name: Datos semilla idempotentes (estaciones, billeteras, flags)
         env:
-          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-        run: |
-          set -euo pipefail
-          terraform init -input=false -backend-config="bucket=$STATE_BUCKET" -backend-config="region=$AWS_REGION"
-          terraform workspace select -or-create "$TARGET_ENV"
-          echo "Aplicando SOLO el ambiente: $(terraform workspace show)"
-          terraform apply -input=false -auto-approve -lock-timeout=10m -var-file="environments/$TARGET_ENV.tfvars"
-      - id: out
-        working-directory: infra/terraform/envs
-        run: |
-          {
-            echo "tg_arn=$(terraform output -raw bff_target_group_arn)"
-            echo "flags_url=$(terraform output -raw flags_api_private_url)"
-            echo "issuer=$(terraform output -raw cognito_issuer)"
-            echo "client_id=$(terraform output -raw cognito_web_client_id)"
-            echo "cluster=$(terraform output -raw eks_cluster_name)"
-          } >> "$GITHUB_OUTPUT"
-      - name: Datos semilla idempotentes (estaciones, billeteras)
+          DYNAMODB_ENDPOINT: http://localhost:4566
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
         run: |
           pip install -e libs/aegis-common
           python scripts/bootstrap.py --env "$TARGET_ENV"
+      - name: Evidencia - historial de versiones del tfstate
+        run: scripts/floci/terraform.sh "$TARGET_ENV" versions
 
   build-images:
     name: build-images
     needs: resolve
-    runs-on: ubuntu-latest
-    environment: ${{ needs.resolve.outputs.env }}
-    permissions: { contents: read, id-token: write }
+    runs-on: ${{ fromJSON(vars.DEPLOY_RUNS_ON || '"ubuntu-latest"') }}
     outputs:
       tags: ${{ steps.build.outputs.tags }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: aws-actions/configure-aws-credentials@5579c002bb4778aa43395ef1df492868a9a1c83f # v4.0.2
-        with: { role-to-assume: "${{ vars.AWS_DEPLOY_ROLE_ARN }}", aws-region: "${{ vars.AWS_REGION }}" }
-      - id: ecr
-        uses: aws-actions/amazon-ecr-login@4625ce35226a7557230889aae2f52eb50ec3dcda # v2.0.1
-      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
       - name: Construir solo lo que cambió (tags por contenido → promoción sin recompilar)
         id: build
         env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REGISTRY: ${{ vars.IMAGE_REGISTRY }}   # p. ej. localhost:5001 (registro del clúster k3d); vacío = solo build local
         run: |
           set -euo pipefail
           tags="{}"
@@ -105,12 +87,13 @@ jobs:
             file=$(jq -r .dockerfile <<<"$img"); args=$(jq -r .args <<<"$img")
             read -r -a paths <<<"$(jq -r .paths <<<"$img")"
             tag=$(scripts/ci/image-tag.sh "${paths[@]}")
-            if aws ecr describe-images --repository-name "aegisvolt/$name" --image-ids "imageTag=$tag" >/dev/null 2>&1; then
-              echo "♻ $name:$tag ya existe en ECR → se reutiliza (misma imagen que en el ambiente anterior)"
+            ref="${REGISTRY:-aegisvolt}/aegisvolt/$name:$tag"
+            if docker image inspect "$ref" >/dev/null 2>&1; then
+              echo "♻ $ref ya existe → se reutiliza la misma imagen del ambiente anterior"
             else
               build_args=(); [[ -n "$args" ]] && build_args=(--build-arg "$args")
-              docker buildx build --push --provenance=true --sbom=true \
-                --build-arg "APP_VERSION=$tag" "${build_args[@]}" -t "$REGISTRY/aegisvolt/$name:$tag" -f "$file" "$ctx"
+              docker build --build-arg "APP_VERSION=$tag" "${build_args[@]}" -t "$ref" -f "$file" "$ctx"
+              [[ -n "${REGISTRY:-}" ]] && docker push "$ref"
             fi
             tags=$(jq -c --arg n "$name" --arg t "$tag" '. + {($n): $t}' <<<"$tags")
           done < <(jq -c '.[]' scripts/ci/images.json)
@@ -119,46 +102,34 @@ jobs:
   deploy-k8s:
     name: deploy-canary
     needs: [resolve, terraform-apply, build-images]
-    runs-on: ubuntu-latest
+    # Requiere un clúster: el k3s de EKS en Floci o un k3d local (variable KUBE_CONTEXT en el Environment).
+    if: ${{ vars.KUBE_CONTEXT != '' }}
+    runs-on: ${{ fromJSON(vars.DEPLOY_RUNS_ON || '"ubuntu-latest"') }}
     environment: ${{ needs.resolve.outputs.env }}
-    permissions: { contents: read, id-token: write }
     env:
       TARGET_ENV: ${{ needs.resolve.outputs.env }}
       TAGS: ${{ needs.build-images.outputs.tags }}
-      CLUSTER: ${{ needs.terraform-apply.outputs.cluster }}
-      BFF_TARGET_GROUP_ARN: ${{ needs.terraform-apply.outputs.tg_arn }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: aws-actions/configure-aws-credentials@5579c002bb4778aa43395ef1df492868a9a1c83f # v4.0.2
-        with: { role-to-assume: "${{ vars.AWS_DEPLOY_ROLE_ARN }}", aws-region: "${{ vars.AWS_REGION }}" }
-      - uses: azure/setup-helm@fe7b79cd5ee1e45176fcad797de68ecaf3ca4814 # v4.2.0
-      - name: Instalar plugin kubectl-argo-rollouts
+      - name: Plataforma (namespace restringido y Kafka/Strimzi)
+        env:
+          KUBE_CONTEXT: ${{ vars.KUBE_CONTEXT }}
         run: |
-          curl -sSLo /usr/local/bin/kubectl-argo-rollouts https://github.com/argoproj/argo-rollouts/releases/download/v1.7.2/kubectl-argo-rollouts-linux-amd64
-          chmod +x /usr/local/bin/kubectl-argo-rollouts
-      - name: Plataforma (namespace restringido, Kafka, TargetGroupBinding)
-        run: |
-          aws eks update-kubeconfig --name "$CLUSTER" --region "${{ vars.AWS_REGION }}"
+          kubectl config use-context "$KUBE_CONTEXT"
           kubectl apply -f deploy/k8s/platform/namespace.yaml
           kubectl apply -f deploy/k8s/platform/kafka.yaml
-          envsubst '${BFF_TARGET_GROUP_ARN}' < deploy/k8s/platform/target-group-binding.yaml | kubectl apply -f -
-      - name: helm upgrade → Argo Rollouts inicia el canary (20 %) en los servicios que cambiaron
+      - name: helm upgrade → Argo Rollouts inicia el canary en los servicios que cambiaron
         env:
-          REGISTRY: ${{ vars.ECR_REGISTRY }}
-          ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
-          FLAGS_URL: ${{ needs.terraform-apply.outputs.flags_url }}
-          ISSUER: ${{ needs.terraform-apply.outputs.issuer }}
-          CLIENT_ID: ${{ needs.terraform-apply.outputs.client_id }}
-          CORS: ${{ vars.WEB_ORIGIN }}
+          REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          FLOCI_IN_CLUSTER: ${{ vars.FLOCI_ENDPOINT_IN_CLUSTER }}   # p. ej. http://host.k3d.internal:4566
         run: |
           set -euo pipefail
           set_tags=()
           for svc in $(jq -r 'keys[]' <<<"$TAGS"); do set_tags+=(--set "services.$svc.imageTag=$(jq -r --arg s "$svc" '.[$s]' <<<"$TAGS")"); done
           helm upgrade --install aegisvolt deploy/helm/aegisvolt -n aegisvolt \
             -f "deploy/helm/aegisvolt/values-$TARGET_ENV.yaml" \
-            --set global.registry="$REGISTRY/aegisvolt" --set global.accountId="$ACCOUNT_ID" \
-            --set global.flagsApiUrl="$FLAGS_URL" --set global.cognitoIssuer="$ISSUER" \
-            --set global.cognitoClientIds="$CLIENT_ID" --set global.corsOrigins="$CORS" "${set_tags[@]}"
+            --set global.registry="${REGISTRY:-aegisvolt}/aegisvolt" \
+            --set global.awsEndpoint="$FLOCI_IN_CLUSTER" "${set_tags[@]}"
       - name: Esperar el análisis del canary (rollback automático si falla)
         run: |
           set -euo pipefail
@@ -167,7 +138,7 @@ jobs:
             echo "::group::$name"
             if ! kubectl argo rollouts status "$name" -n aegisvolt --timeout 15m; then
               kubectl argo rollouts get rollout "$name" -n aegisvolt
-              echo "::error::El canary de $name falló el análisis de CloudWatch: Argo Rollouts revirtió a la versión estable."
+              echo "::error::El canary de $name falló el análisis: Argo Rollouts revirtió a la versión estable."
               exit 1
             fi
             echo "::endgroup::"

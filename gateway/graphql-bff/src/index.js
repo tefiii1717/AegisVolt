@@ -6,7 +6,7 @@ import { createSchema, createYoga } from 'graphql-yoga';
 import { ROLES, authenticate, devJwks, issueDevToken } from './auth.js';
 import { config } from './config.js';
 import { depthLimit } from './depthLimit.js';
-import { log, requestContext } from './logger.js';
+import { errorsLastMinute, log, requestContext } from './logger.js';
 import { resolvers } from './resolvers.js';
 
 const typeDefs = readFileSync(new URL('./schema.graphql', import.meta.url), 'utf8');
@@ -58,6 +58,9 @@ const server = createServer((req, res) => {
   requestContext.run({ correlationId }, async () => {
     const url = new URL(req.url, 'http://bff');
     if (url.pathname === '/health/live' || url.pathname === '/health/ready') return send(res, 200, { status: 'UP' });
+    if (url.pathname === '/health/stats') {
+      return send(res, 200, { service: 'graphql-bff', version: config.version, errors_last_minute: errorsLastMinute() });
+    }
     if (config.authMode === 'dev' && url.pathname === '/auth/dev-token') {
       if (req.method === 'OPTIONS') {
         res.writeHead(204, { 'access-control-allow-origin': config.corsOrigins[0] ?? '*',
