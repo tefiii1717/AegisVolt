@@ -47,12 +47,14 @@ locals {
       }
     }
   }
-  s = local.settings[local.env] # falla en el plan si el workspace no es dev|test|prod
+  # try(): `terraform validate` corre en el workspace "default"; el plan/apply en un workspace
+  # inválido lo detiene terraform_data.workspace_guard (precondición) más abajo.
+  s = try(local.settings[local.env], local.settings.dev)
 
   # Estado inicial de las flags por ambiente, desde la MISMA fuente que usa el entorno local.
   catalog = jsondecode(file("${path.module}/../../../deploy/seed/catalog.json"))
   flags = { for name, f in local.catalog.flags : name => {
-    enabled     = f[local.env]
+    enabled     = try(f[local.env], false)
     description = f.description
     prod_locked = f.prod_locked
   } }

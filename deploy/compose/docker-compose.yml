@@ -45,7 +45,8 @@ services:
     image: floci/floci:latest
     ports: ["127.0.0.1:4566:4566"]   # solo localhost (consola en http://localhost:4566/_floci/ui)
     volumes: [floci-data:/var/lib/floci]
-    networks: [data]
+    # `ops` existe solo para publicar la consola/API de Floci en localhost (las redes internal no publican puertos).
+    networks: [data, ops]
 
   kafka:
     image: apache/kafka:3.9.1
@@ -203,6 +204,7 @@ networks:
   app: {}
   data:
     internal: true
+  ops: {}
 
 volumes:
   floci-data: {}
