@@ -1,0 +1,76 @@
+{
+  "stations": [
+    {
+      "station_id": "EST-BOG-080", "name": "Electrolinera Calle 80", "city": "Bogotá", "address": "Av. Calle 80 # 69-70",
+      "lat": 4.6927, "lng": -74.0832, "map_x": 34, "map_y": 42, "emoji": "⚡",
+      "connectors": [
+        {"connector_id": "C1", "connector_type": "CCS2", "power_kw": 60, "tier": "FAST"},
+        {"connector_id": "C2", "connector_type": "CCS2", "power_kw": 150, "tier": "ULTRA"},
+        {"connector_id": "C3", "connector_type": "TYPE2", "power_kw": 22, "tier": "FAST"}
+      ]
+    },
+    {
+      "station_id": "EST-SIB-001", "name": "Hub Logístico Siberia", "city": "Cota", "address": "Km 3 vía Siberia–Cota",
+      "lat": 4.7341, "lng": -74.1462, "map_x": 16, "map_y": 26, "emoji": "🚚",
+      "connectors": [
+        {"connector_id": "C1", "connector_type": "CCS2", "power_kw": 120, "tier": "FAST"},
+        {"connector_id": "C2", "connector_type": "CCS2", "power_kw": 180, "tier": "ULTRA"},
+        {"connector_id": "C3", "connector_type": "CCS2", "power_kw": 180, "tier": "ULTRA"},
+        {"connector_id": "C4", "connector_type": "CHADEMO", "power_kw": 50, "tier": "FAST"}
+      ]
+    },
+    {
+      "station_id": "EST-FON-002", "name": "Terminal de Carga Fontibón", "city": "Bogotá", "address": "Cra. 100 # 25-90",
+      "lat": 4.6741, "lng": -74.1428, "map_x": 22, "map_y": 60, "emoji": "📦",
+      "connectors": [
+        {"connector_id": "C1", "connector_type": "CCS2", "power_kw": 60, "tier": "FAST"},
+        {"connector_id": "C2", "connector_type": "CCS2", "power_kw": 60, "tier": "FAST"}
+      ]
+    },
+    {
+      "station_id": "EST-ZFB-003", "name": "Zona Franca Bogotá", "city": "Bogotá", "address": "Cra. 106 # 15A-25",
+      "lat": 4.6623, "lng": -74.1563, "map_x": 10, "map_y": 78, "emoji": "🏭",
+      "connectors": [
+        {"connector_id": "C1", "connector_type": "CCS2", "power_kw": 150, "tier": "ULTRA"},
+        {"connector_id": "C2", "connector_type": "TYPE2", "power_kw": 22, "tier": "FAST"}
+      ]
+    },
+    {
+      "station_id": "EST-CHI-004", "name": "Chía Centro Logístico", "city": "Chía", "address": "Variante Chía–Cajicá Km 1",
+      "lat": 4.8619, "lng": -74.0326, "map_x": 58, "map_y": 14, "emoji": "🌿",
+      "connectors": [
+        {"connector_id": "C1", "connector_type": "CCS2", "power_kw": 90, "tier": "FAST"},
+        {"connector_id": "C2", "connector_type": "CCS2", "power_kw": 90, "tier": "FAST"}
+      ]
+    },
+    {
+      "station_id": "EST-USA-005", "name": "Usaquén Última Milla", "city": "Bogotá", "address": "Cl. 140 # 7-30",
+      "lat": 4.7206, "lng": -74.0336, "map_x": 76, "map_y": 46, "emoji": "🏙️",
+      "connectors": [
+        {"connector_id": "C1", "connector_type": "CCS2", "power_kw": 60, "tier": "FAST"},
+        {"connector_id": "C2", "connector_type": "CCS2", "power_kw": 350, "tier": "ULTRA"}
+      ]
+    }
+  ],
+  "fleets": [
+    {"fleet_id": "flota-andina", "name": "Transportes Andinos S.A.S.", "available_cop": 2500000},
+    {"fleet_id": "flota-sabana-verde", "name": "Sabana Verde Logística", "available_cop": 1200000},
+    {"fleet_id": "flota-cafe-express", "name": "Café Express Última Milla", "available_cop": 40000}
+  ],
+  "vehicles": [
+    {"vehicle_id": "VAN-ANDI-01", "fleet_id": "flota-andina", "model": "Furgón eléctrico 2 t", "battery_kwh": 75},
+    {"vehicle_id": "VAN-ANDI-02", "fleet_id": "flota-andina", "model": "Camión eléctrico 7 t", "battery_kwh": 210},
+    {"vehicle_id": "VAN-SAB-01", "fleet_id": "flota-sabana-verde", "model": "Furgón eléctrico 2 t", "battery_kwh": 75},
+    {"vehicle_id": "MOTO-CAFE-01", "fleet_id": "flota-cafe-express", "model": "Van urbana compacta", "battery_kwh": 40}
+  ],
+  "flags": {
+    "ENABLE_DYNAMIC_SURGE_PRICING": {"dev": true, "test": true, "prod": false, "local": true,
+      "description": "Tarifa dinámica (x1.35) en hora pico 17:00–21:00 Bogotá", "prod_locked": false},
+    "ENABLE_FAST_CHARGE_BOOST": {"dev": true, "test": true, "prod": false, "local": true,
+      "description": "Habilita la reserva prioritaria de conectores ULTRA (>=150 kW)", "prod_locked": false},
+    "SIMULATE_CHARGER_HARDWARE_FAULT": {"dev": false, "test": false, "prod": false, "local": false,
+      "description": "Inyección de fallos: el Paso 3 falla y se ejecuta el rollback de la SAGA", "prod_locked": true},
+    "STRANGLER_ROUTE_STATIONS_TO_CORE": {"dev": true, "test": true, "prod": false, "local": true,
+      "description": "Strangler Fig: el catálogo de estaciones se lee del nuevo core (CQRS) en vez del legado", "prod_locked": false}
+  }
+}

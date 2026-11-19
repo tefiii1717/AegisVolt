@@ -1,0 +1,210 @@
+# AegisVolt — entorno local completo.
+#   docker compose -f deploy/compose/docker-compose.yml up --build
+#
+# Redes (aislamiento por capas):
+#   edge  : lo único expuesto al host (frontend y BFF).
+#   app   : tráfico HTTP interno entre BFF y microservicios.
+#   data  : internal=true → sin salida a Internet; solo servicios que hablan con Kafka/Floci.
+# Los contenedores corren sin privilegios: read_only, cap_drop ALL, no-new-privileges.
+
+name: aegisvolt
+
+x-hardening: &hardening
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  restart: unless-stopped
+
+x-python-env: &python-env
+  AEGIS_ENV: local
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  DYNAMODB_ENDPOINT: http://floci:4566
+  KAFKA_BOOTSTRAP: kafka:9092
+  FLAGS_TABLE: aegisvolt-feature-flags-local
+  LOG_LEVEL: INFO
+
+x-python-build: &python-build
+  context: ../..
+  dockerfile: deploy/docker/python-service.Dockerfile
+
+x-service: &service
+  <<: *hardening
+  networks: [app, data]
+  depends_on:
+    bootstrap: { condition: service_completed_successfully }
+  deploy:
+    resources:
+      limits: { cpus: "0.50", memory: 256M }
+
+services:
+  # ---------------- infraestructura ----------------
+  floci:
+    image: floci/floci:latest
+    ports: ["127.0.0.1:4566:4566"]   # solo localhost (consola en http://localhost:4566/_floci/ui)
+    volumes: [floci-data:/var/lib/floci]
+    networks: [data]
+
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"   # los tópicos son contrato: se crean explícitamente
+    volumes: [kafka-data:/var/lib/kafka/data]
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 5s
+      retries: 30
+
+  bootstrap:
+    build: { <<: *python-build, args: { SERVICE_DIR: services/saga-orchestrator } }
+    command: ["python", "/opt/aegis/scripts/bootstrap.py", "--env", "local", "--create-tables", "--topics"]
+    environment: *python-env
+    volumes:
+      - ../../scripts:/opt/aegis/scripts:ro
+      - ../../deploy/seed:/opt/aegis/deploy/seed:ro
+    networks: [data]
+    restart: "no"
+    depends_on:
+      floci: { condition: service_started }   # bootstrap.py espera a que Floci responda
+      kafka: { condition: service_healthy }
+
+  # ---------------- microservicios (bounded contexts) ----------------
+  station-reservation:
+    <<: *service
+    build: { <<: *python-build, args: { SERVICE_DIR: services/station-reservation } }
+    environment: { <<: *python-env, SERVICE_NAME: station-reservation-service, TABLE_NAME: aegisvolt-reservations-local }
+
+  billing-wallet:
+    <<: *service
+    build: { <<: *python-build, args: { SERVICE_DIR: services/billing-wallet } }
+    environment: { <<: *python-env, SERVICE_NAME: billing-wallet-service, TABLE_NAME: aegisvolt-billing-local, SURGE_FORCE_PEAK: "false" }
+
+  energy-dispatch:
+    <<: *service
+    build: { <<: *python-build, args: { SERVICE_DIR: services/energy-dispatch } }
+    environment:
+      <<: *python-env
+      SERVICE_NAME: energy-dispatch-service
+      TABLE_NAME: aegisvolt-dispatch-local
+      LEGACY_CSMS_URL: http://legacy-csms:8000
+      SESSION_TIME_SCALE: "60"
+
+  energy-dispatch-outbox-relay:
+    # Patrón Sidecar en local: el relay del outbox como proceso separado del servicio de dominio.
+    <<: *service
+    build: { <<: *python-build, args: { SERVICE_DIR: services/energy-dispatch } }
+    command: ["python", "-m", "aegis_common.outbox"]
+    environment: { <<: *python-env, SERVICE_NAME: energy-dispatch-service, TABLE_NAME: aegisvolt-dispatch-local }
+    networks: [data]
+    healthcheck: { disable: true }
+    profiles: [sidecar]
+
+  saga-orchestrator:
+    <<: *service
+    build: { <<: *python-build, args: { SERVICE_DIR: services/saga-orchestrator } }
+    environment: { <<: *python-env, SERVICE_NAME: saga-orchestrator, TABLE_NAME: aegisvolt-sagas-local, SAGA_STEP_TIMEOUT_S: "30" }
+
+  query-projection:
+    <<: *service
+    build: { <<: *python-build, args: { SERVICE_DIR: services/query-projection } }
+    environment: { <<: *python-env, SERVICE_NAME: query-projection-service, TABLE_NAME: aegisvolt-readmodel-local }
+
+  # ---------------- sistema heredado + capa anticorrupción ----------------
+  legacy-csms:
+    <<: *service
+    build: { <<: *python-build, args: { SERVICE_DIR: services/legacy-csms } }
+    environment: { KAFKA_BOOTSTRAP: kafka:9092, SESSION_TIME_SCALE: "60", LEGACY_FAILURE_RATE: "0" }
+    ports: ["127.0.0.1:8090:8000"]   # para /admin/chaos en las demos del circuit breaker
+
+  acl-ocpp-translator:
+    <<: *hardening
+    build: { context: ../../streams/acl-ocpp-translator }
+    environment: { AEGIS_ENV: local, KAFKA_BOOTSTRAP: kafka:9092 }
+    networks: [data]
+    depends_on:
+      bootstrap: { condition: service_completed_successfully }
+
+  # ---------------- Lambda de flags (adaptador HTTP local) ----------------
+  flags-admin:
+    <<: *service
+    build: { <<: *python-build, args: { SERVICE_DIR: serverless/flags-admin, APP_MODULE: "local_server:app" } }
+    environment: { <<: *python-env, FLAGS_TABLE: aegisvolt-feature-flags-local }
+
+  # ---------------- borde ----------------
+  graphql-bff:
+    <<: *hardening
+    build: { context: ../../gateway/graphql-bff }
+    environment:
+      AEGIS_ENV: local
+      AUTH_MODE: dev
+      CORS_ORIGINS: http://localhost:5173
+      QUERY_SERVICE_URL: http://query-projection:8000
+      ORCHESTRATOR_URL: http://saga-orchestrator:8000
+      LEGACY_CSMS_URL: http://legacy-csms:8000
+      FLAGS_API_URL: http://flags-admin:8000
+      RESERVATION_URL: http://station-reservation:8000
+      BILLING_URL: http://billing-wallet:8000
+      DISPATCH_URL: http://energy-dispatch:8000
+    ports: ["4000:4000"]
+    networks: [edge, app]
+    depends_on: [query-projection, saga-orchestrator, flags-admin]
+
+  frontend:
+    <<: *hardening
+    build: { context: ../../frontend }
+    read_only: false   # nginx genera config.js al arrancar
+    environment:
+      AEGIS_ENV: local
+      GRAPHQL_URL: http://localhost:4000/graphql
+      AUTH_MODE: dev
+      DEV_TOKEN_URL: http://localhost:4000/auth/dev-token
+      REDIRECT_URI: http://localhost:5173/
+    ports: ["5173:8080"]
+    networks: [edge]
+
+  # ---------------- observabilidad (Prefect) ----------------
+  prefect-server:
+    image: prefecthq/prefect:3-python3.12
+    command: ["prefect", "server", "start", "--host", "0.0.0.0"]
+    environment: { PREFECT_SERVER_API_HOST: 0.0.0.0 }
+    ports: ["127.0.0.1:4200:4200"]
+    volumes: [prefect-data:/root/.prefect]
+    networks: [app]
+    profiles: [observability]
+
+  prefect-flows:
+    build: { context: ../../observability/prefect }
+    environment:
+      <<: *python-env
+      PREFECT_API_URL: http://prefect-server:4200/api
+      AEGIS_ENVIRONMENTS: local
+      ORCHESTRATOR_URL_LOCAL: http://saga-orchestrator:8000
+      QUERY_URL_LOCAL: http://query-projection:8000
+      BFF_URL_LOCAL: http://graphql-bff:4000
+    networks: [app, data]
+    depends_on: [prefect-server]
+    profiles: [observability]
+
+networks:
+  edge: {}
+  app: {}
+  data:
+    internal: true
+
+volumes:
+  floci-data: {}
+  kafka-data: {}
+  prefect-data: {}

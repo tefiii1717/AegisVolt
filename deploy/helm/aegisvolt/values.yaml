@@ -1,0 +1,66 @@
+# Valores comunes. Cada ambiente sobreescribe en values-<env>.yaml.
+global:
+  environment: dev
+  region: us-east-1
+  registry: 000000000000.dkr.ecr.us-east-1.amazonaws.com/aegisvolt
+  imageTag: latest            # el pipeline fija el SHA del commit
+  kafkaBootstrap: aegisvolt-kafka-bootstrap.kafka.svc:9092
+  accountId: "000000000000"
+  flagsApiUrl: ""             # URL privada de la REST API (output de Terraform)
+  graphqlHost: ""
+  cognitoIssuer: ""
+  cognitoClientIds: ""
+  corsOrigins: ""
+  canary:
+    weight: 20               # % de tráfico (BFF) o de réplicas (consumidores Kafka) en la versión nueva
+    pauseSeconds: 60
+    maxErrors: 2             # errores tolerados de la versión canary por minuto (CloudWatch)
+
+fluentBit:
+  image: public.ecr.aws/aws-observability/aws-for-fluent-bit:2.32.4
+
+# Microservicios. outbox=true → se agrega el relay del outbox como contenedor SIDECAR.
+services:
+  station-reservation:
+    serviceName: station-reservation-service
+    table: reservations
+    outbox: true
+    replicas: 5
+  billing-wallet:
+    serviceName: billing-wallet-service
+    table: billing
+    outbox: true
+    replicas: 5
+  energy-dispatch:
+    serviceName: energy-dispatch-service
+    table: dispatch
+    outbox: true
+    replicas: 5
+    env:
+      LEGACY_CSMS_URL: http://legacy-csms:8000
+      SESSION_TIME_SCALE: "60"
+  saga-orchestrator:
+    serviceName: saga-orchestrator
+    table: sagas
+    outbox: true
+    replicas: 5
+    env:
+      SAGA_STEP_TIMEOUT_S: "30"
+  query-projection:
+    serviceName: query-projection-service
+    table: readmodel
+    outbox: false
+    replicas: 5
+  legacy-csms:
+    serviceName: legacy-csms
+    replicas: 1              # el legado no escala horizontalmente (estado en memoria)
+    canary: false
+  graphql-bff:
+    serviceName: graphql-bff
+    port: 4000
+    replicas: 3
+    trafficRouting: true     # canary por PESO EXACTO con ingress-nginx
+
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 256Mi }

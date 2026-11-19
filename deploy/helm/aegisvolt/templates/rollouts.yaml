@@ -1,0 +1,185 @@
+{{- $root := . -}}
+{{- $g := .Values.global -}}
+{{- range $name, $svc := .Values.services }}
+{{- $ctx := dict "root" $root "name" $name }}
+{{- $port := default 8000 $svc.port }}
+{{- $tag := default $g.imageTag $svc.imageTag }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aegis.labels" $ctx | nindent 4 }}
+  annotations:
+    # IRSA: rol IAM propio por servicio (solo su tabla DynamoDB). Lo crea Terraform.
+    eks.amazonaws.com/role-arn: arn:aws:iam::{{ $g.accountId }}:role/aegisvolt-{{ $g.environment }}-{{ $name }}
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aegis.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "aegis.selector" $ctx | nindent 4 }}
+  ports: [{ name: http, port: {{ $port }}, targetPort: http }]
+{{- if $svc.trafficRouting }}
+---
+# Service del canary: ingress-nginx envía aquí el peso configurado (20 %) durante el rollout.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-canary
+  labels: {{- include "aegis.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "aegis.selector" $ctx | nindent 4 }}
+  ports: [{ name: http, port: {{ $port }}, targetPort: http }]
+{{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "aegis.selector" $ctx | nindent 6 }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aegis.labels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: {{- include "aegis.selector" $ctx | nindent 6 }}
+  strategy:
+    {{- if eq (toString $svc.canary) "false" }}
+    canary:
+      steps: []                     # sistema heredado: reemplazo directo
+    {{- else }}
+    canary:
+      {{- if $svc.trafficRouting }}
+      stableService: {{ $name }}
+      canaryService: {{ $name }}-canary
+      trafficRouting:
+        nginx:
+          stableIngress: {{ $name }}
+      {{- end }}
+      # Sin trafficRouting (consumidores Kafka): el peso se aplica por RÉPLICAS → 1 de 5 pods ≈ 20 %
+      # de las particiones del grupo de consumidores.
+      steps:
+        - setWeight: {{ $g.canary.weight }}
+        - pause: { duration: {{ $g.canary.pauseSeconds }} }
+        - analysis:
+            templates: [{ templateName: canary-error-rate }]
+            args:
+              - { name: service, value: {{ $svc.serviceName }} }
+              - { name: version, value: {{ $tag | quote }} }
+        - setWeight: 100
+      # Si el análisis falla: abort → todo el tráfico vuelve a la versión estable (rollback automático).
+      abortScaleDownDelaySeconds: 30
+    {{- end }}
+  template:
+    metadata:
+      labels: {{- include "aegis.labels" $ctx | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      securityContext: { runAsNonRoot: true, fsGroup: 10001 }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "aegis.selector" $ctx | nindent 14 }}
+      volumes:
+        - { name: logs, emptyDir: { sizeLimit: 128Mi } }
+        - { name: tmp, emptyDir: {} }
+        - { name: fluent-bit-config, configMap: { name: fluent-bit-sidecar } }
+      initContainers:
+        # SIDECAR NATIVO (K8s >= 1.29): arranca antes y termina después del contenedor principal.
+        # Envía el archivo de logs JSON al grupo /aegisvolt/<env>/<servicio> de CloudWatch.
+        - name: fluent-bit
+          image: {{ $root.Values.fluentBit.image }}
+          restartPolicy: Always
+          env:
+            - { name: LOG_GROUP, value: "/aegisvolt/{{ $g.environment }}/{{ $svc.serviceName }}" }
+            - { name: AWS_REGION, value: {{ $g.region }} }
+            - { name: POD_NAME, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+          volumeMounts:
+            - { name: logs, mountPath: /var/log/aegis, readOnly: true }
+            - { name: fluent-bit-config, mountPath: /fluent-bit/etc/aegis }
+          args: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/aegis/fluent-bit.conf"]
+          resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { cpu: 100m, memory: 64Mi } }
+          securityContext: {{- include "aegis.securityContext" $ctx | nindent 12 }}
+        {{- if $svc.outbox }}
+        # SIDECAR: relay del Transactional Outbox (DynamoDB → Kafka) desacoplado del dominio.
+        - name: outbox-relay
+          image: "{{ $g.registry }}/{{ $name }}:{{ $tag }}"
+          restartPolicy: Always
+          command: ["python", "-m", "aegis_common.outbox"]
+          env:
+            - { name: SERVICE_NAME, value: {{ $svc.serviceName }} }
+            - { name: AEGIS_ENV, value: {{ $g.environment }} }
+            - { name: AWS_REGION, value: {{ $g.region }} }
+            - { name: TABLE_NAME, value: "aegisvolt-{{ $svc.table }}-{{ $g.environment }}" }
+            - { name: KAFKA_BOOTSTRAP, value: {{ $g.kafkaBootstrap }} }
+            - { name: LOG_FILE, value: /var/log/aegis/outbox.log }
+          volumeMounts: [{ name: logs, mountPath: /var/log/aegis }]
+          resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 200m, memory: 128Mi } }
+          securityContext: {{- include "aegis.securityContext" $ctx | nindent 12 }}
+        {{- end }}
+      containers:
+        - name: app
+          image: "{{ $g.registry }}/{{ $name }}:{{ $tag }}"
+          ports: [{ name: http, containerPort: {{ $port }} }]
+          env:
+            - { name: SERVICE_NAME, value: {{ $svc.serviceName }} }
+            - { name: AEGIS_ENV, value: {{ $g.environment }} }
+            - { name: APP_VERSION, value: {{ $tag | quote }} }
+            - { name: AWS_REGION, value: {{ $g.region }} }
+            - { name: KAFKA_BOOTSTRAP, value: {{ $g.kafkaBootstrap }} }
+            - { name: FLAGS_TABLE, value: "aegisvolt-feature-flags-{{ $g.environment }}" }
+            - { name: LOG_FILE, value: /var/log/aegis/app.log }
+            {{- if $svc.table }}
+            - { name: TABLE_NAME, value: "aegisvolt-{{ $svc.table }}-{{ $g.environment }}" }
+            - { name: OUTBOX_RELAY_MODE, value: {{ ternary "sidecar" "off" (default false $svc.outbox) }} }
+            {{- end }}
+            {{- if eq $name "graphql-bff" }}
+            - { name: AUTH_MODE, value: cognito }
+            - { name: COGNITO_ISSUER, value: {{ $g.cognitoIssuer | quote }} }
+            - { name: COGNITO_CLIENT_IDS, value: {{ $g.cognitoClientIds | quote }} }
+            - { name: CORS_ORIGINS, value: {{ $g.corsOrigins | quote }} }
+            - { name: FLAGS_API_URL, value: {{ $g.flagsApiUrl | quote }} }
+            - { name: QUERY_SERVICE_URL, value: http://query-projection:8000 }
+            - { name: ORCHESTRATOR_URL, value: http://saga-orchestrator:8000 }
+            - { name: LEGACY_CSMS_URL, value: http://legacy-csms:8000 }
+            - { name: RESERVATION_URL, value: http://station-reservation:8000 }
+            - { name: BILLING_URL, value: http://billing-wallet:8000 }
+            - { name: DISPATCH_URL, value: http://energy-dispatch:8000 }
+            {{- end }}
+            {{- range $k, $v := $svc.env }}
+            - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health/live, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          startupProbe:
+            httpGet: { path: /health/live, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          resources: {{- toYaml $root.Values.resources | nindent 12 }}
+          securityContext: {{- include "aegis.securityContext" $ctx | nindent 12 }}
+          volumeMounts:
+            - { name: logs, mountPath: /var/log/aegis }
+            - { name: tmp, mountPath: /tmp }
+{{- end }}

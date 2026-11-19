@@ -1,0 +1,28 @@
+{
+  "name": "@aegisvolt/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Consola web de AegisVolt (SPA con Vite: sin React Server Components → no expuesta a React2Shell).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "audit:ci": "npm audit --omit=dev --audit-level=high"
+  },
+  "dependencies": {
+    "@fontsource-variable/big-shoulders-display": "^5.3.0",
+    "@fontsource-variable/nunito-sans": "^5.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "@vitejs/plugin-react": "^6.3.0",
+    "tailwindcss": "^4.3.5",
+    "vite": "^8.3.8"
+  },
+  "overrides": {
+    "react-server-dom-webpack": ">=19.2.3"
+  }
+}
