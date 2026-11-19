@@ -11,6 +11,7 @@
 #  6. El pod BFF llama a los microservicios por Services ClusterIP (NetworkPolicies limitan quién habla con quién).
 
 resource "aws_security_group" "vpclink" {
+  #checkov:skip=CKV2_AWS_5:Sí está asociado: lo usa aws_apigatewayv2_vpc_link.this (Checkov no reconoce esa relación).
   name        = "aegisvolt-vpclink-${var.environment}"
   description = "ENIs de la VPC Link de API Gateway"
   vpc_id      = var.vpc_id
