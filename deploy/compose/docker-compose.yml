@@ -44,7 +44,11 @@ services:
   floci:
     image: floci/floci:latest
     ports: ["127.0.0.1:4566:4566"]   # solo localhost (consola en http://localhost:4566/_floci/ui)
-    volumes: [floci-data:/var/lib/floci]
+    environment:
+      FLOCI_STORAGE_MODE: persistent        # el estado sobrevive reinicios del contenedor
+    volumes:
+      - floci-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock   # Lambda y EKS (k3s) corren como contenedores reales
     # `ops` existe solo para publicar la consola/API de Floci en localhost (las redes internal no publican puertos).
     networks: [data, ops]
 

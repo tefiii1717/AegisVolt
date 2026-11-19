@@ -160,7 +160,6 @@ jobs:
     needs: [promotion-guard]
     permissions:
       contents: read
-      id-token: write        # OIDC hacia AWS (rol de solo lectura para planes)
       pull-requests: write   # publicar el resumen del plan en el PR
     env:
       TARGET_ENV: ${{ github.base_ref }}
@@ -168,23 +167,24 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with: { terraform_version: "1.10.5", terraform_wrapper: false }
-      - uses: aws-actions/configure-aws-credentials@5579c002bb4778aa43395ef1df492868a9a1c83f # v4.0.2
-        with:
-          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+      - name: Levantar Floci (emulador de AWS; sin cuenta de AWS)
+        run: scripts/floci/terraform.sh up
+      - name: Bootstrap del estado remoto (S3 versionado + tabla de bloqueo)
+        run: scripts/floci/terraform.sh bootstrap
       - name: terraform plan sobre el workspace de la rama DESTINO
-        working-directory: infra/terraform/envs
-        env:
-          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: scripts/floci/terraform.sh "$TARGET_ENV" plan
+      - name: Prueba de humo del IaC - apply en el Floci efímero del runner
+        run: scripts/floci/terraform.sh "$TARGET_ENV" apply
+      - name: Evidencia - versiones del tfstate del workspace
         run: |
-          set -euo pipefail
-          terraform init -input=false -backend-config="bucket=$STATE_BUCKET" -backend-config="region=$AWS_REGION"
-          terraform workspace select "$TARGET_ENV"
-          terraform plan -input=false -lock-timeout=5m -var-file="environments/$TARGET_ENV.tfvars" -out=tfplan
-          terraform show -no-color tfplan | tail -c 60000 > plan.txt
+          scripts/floci/terraform.sh "$TARGET_ENV" apply >/dev/null   # segundo apply → segunda versión del estado
+          scripts/floci/terraform.sh "$TARGET_ENV" versions
+      - name: Logs de Floci si falla
+        if: failure()
+        run: docker logs --tail 300 aegisvolt-floci
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with: { name: "tfplan-${{ github.base_ref }}", path: infra/terraform/envs/plan.txt, retention-days: 7 }
+        if: always()
+        with: { name: "tfplan-${{ github.base_ref }}", path: infra/terraform/envs/plan.txt, retention-days: 7, if-no-files-found: ignore }
       - name: Publicar resumen del plan en el PR
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
@@ -194,5 +194,5 @@ jobs:
             const summary = (plan.match(/Plan: .*|No changes\..*/) || ['(sin resumen)'])[0];
             await github.rest.issues.createComment({
               ...context.repo, issue_number: context.issue.number,
-              body: `### terraform plan · workspace \`${process.env.TARGET_ENV}\`\n**${summary}**\n<details><summary>Plan completo</summary>\n\n\`\`\`\n${plan.slice(-55000)}\n\`\`\`\n</details>`,
+              body: `### terraform plan (Floci) · workspace \`${process.env.TARGET_ENV}\`\n**${summary}**\n<details><summary>Plan completo</summary>\n\n\`\`\`\n${plan.slice(-55000)}\n\`\`\`\n</details>`,
             });

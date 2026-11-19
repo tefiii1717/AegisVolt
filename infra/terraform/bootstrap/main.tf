@@ -14,13 +14,33 @@ terraform {
 
 provider "aws" {
   region = var.region
+
+  access_key                  = var.use_floci ? "test" : null
+  secret_key                  = var.use_floci ? "test" : null
+  skip_credentials_validation = var.use_floci
+  skip_requesting_account_id  = var.use_floci
+  skip_metadata_api_check     = var.use_floci
+  skip_region_validation      = var.use_floci
+  s3_use_path_style           = var.use_floci
+
+  dynamic "endpoints" {
+    for_each = var.use_floci ? [1] : []
+    content {
+      dynamodb = var.floci_endpoint
+      ecr      = var.floci_endpoint
+      iam      = var.floci_endpoint
+      s3       = var.floci_endpoint
+      sts      = var.floci_endpoint
+    }
+  }
+
   default_tags { tags = { Project = "AegisVolt", ManagedBy = "Terraform", Stack = "bootstrap" } }
 }
 
 data "aws_caller_identity" "current" {}
 
 locals {
-  bucket_name  = coalesce(var.state_bucket_name, "aegisvolt-tfstate-${data.aws_caller_identity.current.account_id}")
+  bucket_name  = coalesce(var.state_bucket_name, var.use_floci ? "aegisvolt-tfstate" : "aegisvolt-tfstate-${data.aws_caller_identity.current.account_id}")
   environments = ["dev", "test", "prod"]
   services = ["station-reservation", "billing-wallet", "energy-dispatch", "saga-orchestrator", "query-projection",
   "legacy-csms", "flags-admin", "graphql-bff", "frontend", "acl-ocpp-translator", "prefect-flows"]
@@ -100,10 +120,24 @@ resource "aws_s3_bucket_policy" "state" {
   policy = data.aws_iam_policy_document.state_tls_only.json
 }
 
+# Tabla de bloqueo del estado (Floci). En AWS real se usa el bloqueo nativo de S3 (use_lockfile).
+resource "aws_dynamodb_table" "tflock" {
+  #checkov:skip=CKV_AWS_119:Tabla técnica de bloqueo de Terraform sin datos sensibles.
+  #checkov:skip=CKV_AWS_28:Los locks son efímeros; no requieren PITR.
+  count        = var.use_floci ? 1 : 0
+  name         = "aegisvolt-tflock"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+}
+
 # ---------------- ECR compartido ----------------
 #tfsec:ignore:aws-ecr-repository-customer-key Cifrado KMS con la llave administrada de ECR.
 resource "aws_ecr_repository" "service" {
-  for_each             = toset(local.services)
+  for_each             = var.create_ecr ? toset(local.services) : toset([])
   name                 = "aegisvolt/${each.key}"
   image_tag_mutability = "IMMUTABLE" # un tag nunca cambia de contenido → promoción reproducible
   image_scanning_configuration { scan_on_push = true }

@@ -15,10 +15,27 @@ variable "state_version_retention_days" {
   default     = 90
 }
 
-variable "create_github_oidc" {
-  description = "Crear proveedor OIDC de GitHub y roles de despliegue (false en cuentas sin permisos IAM, p. ej. Learner Lab)."
+variable "use_floci" {
+  description = "true (por defecto) = bucket de estado y tabla de bloqueo en Floci."
   type        = bool
   default     = true
+}
+
+variable "floci_endpoint" {
+  type    = string
+  default = "http://localhost:4566"
+}
+
+variable "create_ecr" {
+  description = "Repositorios ECR compartidos (solo con AWS real; en Floci las imágenes se construyen localmente)."
+  type        = bool
+  default     = false
+}
+
+variable "create_github_oidc" {
+  description = "Proveedor OIDC de GitHub y roles de despliegue (solo con AWS real)."
+  type        = bool
+  default     = false
 }
 
 variable "github_repository" {

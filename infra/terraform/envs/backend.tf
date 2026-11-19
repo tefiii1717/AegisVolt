@@ -8,8 +8,10 @@
 # `terraform workspace select test` hace que plan/apply SOLO lean y escriban env:/test/...
 terraform {
   backend "s3" {
-    key          = "aegisvolt/platform.tfstate"
-    encrypt      = true
-    use_lockfile = true # bloqueo nativo (archivo .tflock en S3): dos applies no corren a la vez
+    key     = "aegisvolt/platform.tfstate"
+    encrypt = true
+    # El mecanismo de bloqueo va en el archivo -backend-config:
+    #   floci.hcl → tabla DynamoDB aegisvolt-tflock (como la suite de compatibilidad de Floci)
+    #   aws.hcl   → use_lockfile = true (bloqueo nativo con archivo .tflock en S3)
   }
 }

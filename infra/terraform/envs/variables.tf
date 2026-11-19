@@ -4,9 +4,9 @@ variable "region" {
 }
 
 variable "use_floci" {
-  description = "true = aplicar contra Floci (emulador local). EKS no se crea en ese modo (usar kind/k3d)."
+  description = "true (por defecto) = todo se aprovisiona en Floci, el emulador local de AWS; false = AWS real."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "floci_endpoint" {
