@@ -7,7 +7,7 @@ import { test } from 'node:test';
 const { issueDevToken, verifyToken, requireScope, SCOPES } = await import('../src/auth.js');
 const { translateLegacyStation, projectToMap } = await import('../src/legacyAcl.js');
 const { toTransaction } = await import('../src/resolvers.js');
-const { yoga } = await import('../src/index.js');
+const { yoga, allowedOrigin } = await import('../src/index.js');
 
 test('el token de operador no tiene flags.admin', async () => {
   const claims = await verifyToken(await issueDevToken('fleet-operator'));
@@ -58,4 +58,13 @@ test('GraphQL sin token responde UNAUTHENTICATED y limita profundidad', async ()
   const ok = await (await yoga.fetch('http://x/graphql', { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ query: deep }) })).json();
   assert.ok(!String(ok.errors?.[0]?.message).includes('Profundidad'));
+});
+
+test('CORS: refleja solo orígenes de la lista y permite cualquiera sin lista', () => {
+  const list = ['http://127.0.0.1:5173', 'http://localhost:5173'];
+  assert.equal(allowedOrigin('http://127.0.0.1:5173', list), 'http://127.0.0.1:5173');
+  assert.equal(allowedOrigin('http://localhost:5173', list), 'http://localhost:5173');
+  assert.equal(allowedOrigin('http://evil.example', list), null);
+  assert.equal(allowedOrigin(undefined, list), null);
+  assert.equal(allowedOrigin('http://x', []), '*');
 });

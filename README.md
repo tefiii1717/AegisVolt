@@ -43,7 +43,7 @@ Requisitos: Docker con Compose v2.
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml up -d --build
-# Consola web:   http://localhost:5173   (elige un rol de prueba)
+# Consola web:   http://127.0.0.1:5173   (elige un rol de prueba)
 # GraphiQL:      http://localhost:4000/graphql
 # Floci (AWS):   http://localhost:4566/_floci/ui
 # Prefect:       docker compose -f deploy/compose/docker-compose.yml --profile observability up -d → http://localhost:4200

@@ -7,7 +7,7 @@
 #   scripts/floci/deploy-k8s.sh dev helm     # chart (Argo Rollouts); con imágenes nuevas → canary
 #   scripts/floci/deploy-k8s.sh dev e2e      # SAGA completa (feliz + rollback por flag) contra el clúster
 #   scripts/floci/deploy-k8s.sh dev tunnels  # port-forwards persistentes (BFF y servicios)
-#   scripts/floci/deploy-k8s.sh dev ui       # consola web en http://localhost:5173
+#   scripts/floci/deploy-k8s.sh dev ui       # consola web en http://127.0.0.1:5173
 #   scripts/floci/deploy-k8s.sh dev logs     # logs en CloudWatch (Floci) enviados por Fluent Bit
 #   scripts/floci/deploy-k8s.sh dev prefect  # Prefect: salud + auditoría de SAGAs (UI en :4200)
 #   scripts/floci/deploy-k8s.sh dev status   # estado de pods y rollouts
@@ -79,7 +79,7 @@ case "$STEP" in
       --set global.registry=aegisvolt --set global.authMode=dev \
       --set global.awsEndpoint="$(floci_from_cluster)" \
       --set global.kafkaBootstrap=aegisvolt-kafka-bootstrap.kafka.svc:9092 \
-      --set global.corsOrigins=http://localhost:5173 \
+      --set-string "global.corsOrigins=http://127.0.0.1:5173\,http://localhost:5173" \
       --set global.flagsApiUrl=http://flags-admin:8000 "${set_tags[@]}"
     kubectl get rollouts -n aegisvolt ;;
   e2e)
@@ -101,22 +101,30 @@ case "$STEP" in
     for pair in graphql-bff:4000:4000 station-reservation:8101:8000 billing-wallet:8102:8000 energy-dispatch:8103:8000 \
                 saga-orchestrator:8104:8000 query-projection:8105:8000; do
       IFS=: read -r svc local remote <<<"$pair"
-      nohup kubectl port-forward -n aegisvolt "svc/$svc" "$local:$remote" >"/tmp/aegis-pf-$svc.log" 2>&1 &
+      nohup kubectl port-forward --address 127.0.0.1 -n aegisvolt "svc/$svc" "$local:$remote" >"/tmp/aegis-pf-$svc.log" 2>&1 &
       disown; i=$((i + 1))
     done
-    sleep 4
-    for p in 4000 8101 8102 8103 8104 8105; do
-      printf "localhost:%s → " "$p"; curl -s -o /dev/null -w "%{http_code}\n" --max-time 5 "http://localhost:$p/health/live"
+    # Cada túnel tiene hasta 20 s para responder; si no, se muestra su log (sin abortar el resto).
+    for pair in graphql-bff:4000 station-reservation:8101 billing-wallet:8102 energy-dispatch:8103 \
+                saga-orchestrator:8104 query-projection:8105; do
+      IFS=: read -r svc p <<<"$pair"
+      code=000
+      for _ in $(seq 1 20); do
+        code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:$p/health/live" || true)
+        [ "$code" = 200 ] && break; sleep 1
+      done
+      echo "127.0.0.1:$p ($svc) → $code"
+      [ "$code" = 200 ] || tail -3 "/tmp/aegis-pf-$svc.log" | sed 's/^/    /'
     done ;;
   ui)
     # Frontend (nginx) apuntando al BFF del clúster vía el túnel de localhost:4000.
     docker build -q -t aegisvolt/frontend:local frontend >/dev/null
     docker rm -f aegisvolt-ui >/dev/null 2>&1 || true
     docker run -d --name aegisvolt-ui -p 5173:8080 \
-      -e AEGIS_ENV="$ENV" -e GRAPHQL_URL=http://localhost:4000/graphql -e AUTH_MODE=dev \
-      -e DEV_TOKEN_URL=http://localhost:4000/auth/dev-token -e REDIRECT_URI=http://localhost:5173/ \
+      -e AEGIS_ENV="$ENV" -e GRAPHQL_URL=http://127.0.0.1:4000/graphql -e AUTH_MODE=dev \
+      -e DEV_TOKEN_URL=http://127.0.0.1:4000/auth/dev-token -e REDIRECT_URI=http://127.0.0.1:5173/ \
       aegisvolt/frontend:local >/dev/null
-    echo "Consola web: http://localhost:5173 (ábrela en el navegador de Windows)" ;;
+    echo "Consola web: http://127.0.0.1:5173 (ábrela en el navegador de Windows; usa 127.0.0.1, no localhost)" ;;
   logs)
     # Fluent Bit (sidecar) → CloudWatch Logs de Floci: grupos y streams por servicio.
     export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1

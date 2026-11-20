@@ -47,8 +47,20 @@ async function readJson(req, limit = 4096) {
   return body ? JSON.parse(body) : {};
 }
 
-function send(res, status, payload) {
-  res.writeHead(status, { 'content-type': 'application/json', 'access-control-allow-origin': config.corsOrigins[0] ?? '*' });
+// Origen permitido para las rutas propias (fuera de Yoga): refleja el Origin si está en la
+// lista CORS_ORIGINS; sin lista configurada se permite cualquiera ('*').
+export function allowedOrigin(origin, origins = config.corsOrigins) {
+  if (origins.length === 0) return '*';
+  return origin && origins.includes(origin) ? origin : null;
+}
+
+function corsHeaders(req) {
+  const allow = allowedOrigin(req.headers.origin);
+  return allow ? { 'access-control-allow-origin': allow, vary: 'Origin' } : { vary: 'Origin' };
+}
+
+function send(req, res, status, payload) {
+  res.writeHead(status, { 'content-type': 'application/json', ...corsHeaders(req) });
   res.end(JSON.stringify(payload));
 }
 
@@ -57,25 +69,25 @@ const server = createServer((req, res) => {
   res.setHeader('x-correlation-id', correlationId);
   requestContext.run({ correlationId }, async () => {
     const url = new URL(req.url, 'http://bff');
-    if (url.pathname === '/health/live' || url.pathname === '/health/ready') return send(res, 200, { status: 'UP' });
+    if (url.pathname === '/health/live' || url.pathname === '/health/ready') return send(req, res, 200, { status: 'UP' });
     if (url.pathname === '/health/stats') {
-      return send(res, 200, { service: 'graphql-bff', version: config.version, errors_last_minute: errorsLastMinute() });
+      return send(req, res, 200, { service: 'graphql-bff', version: config.version, errors_last_minute: errorsLastMinute() });
     }
     if (config.authMode === 'dev' && url.pathname === '/auth/dev-token') {
       if (req.method === 'OPTIONS') {
-        res.writeHead(204, { 'access-control-allow-origin': config.corsOrigins[0] ?? '*',
+        res.writeHead(204, { ...corsHeaders(req),
           'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'POST' });
         return res.end();
       }
       try {
         const { role } = await readJson(req);
         const token = await issueDevToken(role);
-        return send(res, 200, { access_token: token, token_type: 'Bearer', expires_in: 3600, scope: ROLES[role].join(' ') });
+        return send(req, res, 200, { access_token: token, token_type: 'Bearer', expires_in: 3600, scope: ROLES[role].join(' ') });
       } catch (err) {
-        return send(res, 400, { error: String(err.message) });
+        return send(req, res, 400, { error: String(err.message) });
       }
     }
-    if (config.authMode === 'dev' && url.pathname === '/.well-known/jwks.json') return send(res, 200, await devJwks());
+    if (config.authMode === 'dev' && url.pathname === '/.well-known/jwks.json') return send(req, res, 200, await devJwks());
     return yoga(req, res);
   });
 });
