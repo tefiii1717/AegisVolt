@@ -79,7 +79,7 @@ spec:
         - analysis:
             templates: [{ templateName: canary-error-rate-{{ $g.canary.provider }} }]
             args:
-              - { name: service, value: {{ $svc.serviceName }} }
+              - { name: service, value: {{ $svc.serviceName | quote }} }
               - { name: canary-url, value: "http://{{ $name }}-canary:{{ $port }}/health/stats" }
               - { name: version, value: {{ $tag | quote }} }
         - setWeight: 100
@@ -110,13 +110,13 @@ spec:
           restartPolicy: Always
           env:
             - { name: LOG_GROUP, value: "/aegisvolt/{{ $g.environment }}/{{ $svc.serviceName }}" }
-            - { name: AWS_REGION, value: {{ $g.region }} }
+            - { name: AWS_REGION, value: {{ $g.region | quote }} }
             - { name: POD_NAME, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
             {{- if $g.awsEndpoint }}
             - { name: DYNAMODB_ENDPOINT, value: {{ $g.awsEndpoint | quote }} }
             - { name: AWS_ENDPOINT_URL, value: {{ $g.awsEndpoint | quote }} }
-            - { name: AWS_ACCESS_KEY_ID, value: test }
-            - { name: AWS_SECRET_ACCESS_KEY, value: test }
+            - { name: AWS_ACCESS_KEY_ID, value: "test" }
+            - { name: AWS_SECRET_ACCESS_KEY, value: "test" }
             {{- end }}
           volumeMounts:
             - { name: logs, mountPath: /var/log/aegis, readOnly: true }
@@ -131,17 +131,17 @@ spec:
           restartPolicy: Always
           command: ["python", "-m", "aegis_common.outbox"]
           env:
-            - { name: SERVICE_NAME, value: {{ $svc.serviceName }} }
-            - { name: AEGIS_ENV, value: {{ $g.environment }} }
-            - { name: AWS_REGION, value: {{ $g.region }} }
+            - { name: SERVICE_NAME, value: {{ $svc.serviceName | quote }} }
+            - { name: AEGIS_ENV, value: {{ $g.environment | quote }} }
+            - { name: AWS_REGION, value: {{ $g.region | quote }} }
             - { name: TABLE_NAME, value: "aegisvolt-{{ $svc.table }}-{{ $g.environment }}" }
-            - { name: KAFKA_BOOTSTRAP, value: {{ $g.kafkaBootstrap }} }
-            - { name: LOG_FILE, value: /var/log/aegis/outbox.log }
+            - { name: KAFKA_BOOTSTRAP, value: {{ $g.kafkaBootstrap | quote }} }
+            - { name: LOG_FILE, value: "/var/log/aegis/outbox.log" }
             {{- if $g.awsEndpoint }}
             - { name: DYNAMODB_ENDPOINT, value: {{ $g.awsEndpoint | quote }} }
             - { name: AWS_ENDPOINT_URL, value: {{ $g.awsEndpoint | quote }} }
-            - { name: AWS_ACCESS_KEY_ID, value: test }
-            - { name: AWS_SECRET_ACCESS_KEY, value: test }
+            - { name: AWS_ACCESS_KEY_ID, value: "test" }
+            - { name: AWS_SECRET_ACCESS_KEY, value: "test" }
             {{- end }}
           volumeMounts: [{ name: logs, mountPath: /var/log/aegis }]
           resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { cpu: 200m, memory: 128Mi } }
@@ -152,35 +152,35 @@ spec:
           image: "{{ $g.registry }}/{{ $name }}:{{ $tag }}"
           ports: [{ name: http, containerPort: {{ $port }} }]
           env:
-            - { name: SERVICE_NAME, value: {{ $svc.serviceName }} }
-            - { name: AEGIS_ENV, value: {{ $g.environment }} }
+            - { name: SERVICE_NAME, value: {{ $svc.serviceName | quote }} }
+            - { name: AEGIS_ENV, value: {{ $g.environment | quote }} }
             - { name: APP_VERSION, value: {{ $tag | quote }} }
-            - { name: AWS_REGION, value: {{ $g.region }} }
-            - { name: KAFKA_BOOTSTRAP, value: {{ $g.kafkaBootstrap }} }
+            - { name: AWS_REGION, value: {{ $g.region | quote }} }
+            - { name: KAFKA_BOOTSTRAP, value: {{ $g.kafkaBootstrap | quote }} }
             - { name: FLAGS_TABLE, value: "aegisvolt-feature-flags-{{ $g.environment }}" }
-            - { name: LOG_FILE, value: /var/log/aegis/app.log }
+            - { name: LOG_FILE, value: "/var/log/aegis/app.log" }
             {{- if $g.awsEndpoint }}
             - { name: DYNAMODB_ENDPOINT, value: {{ $g.awsEndpoint | quote }} }
             - { name: AWS_ENDPOINT_URL, value: {{ $g.awsEndpoint | quote }} }
-            - { name: AWS_ACCESS_KEY_ID, value: test }
-            - { name: AWS_SECRET_ACCESS_KEY, value: test }
+            - { name: AWS_ACCESS_KEY_ID, value: "test" }
+            - { name: AWS_SECRET_ACCESS_KEY, value: "test" }
             {{- end }}
             {{- if $svc.table }}
             - { name: TABLE_NAME, value: "aegisvolt-{{ $svc.table }}-{{ $g.environment }}" }
-            - { name: OUTBOX_RELAY_MODE, value: {{ ternary "sidecar" "off" (default false $svc.outbox) }} }
+            - { name: OUTBOX_RELAY_MODE, value: {{ ternary "sidecar" "off" (default false $svc.outbox) | quote }} }
             {{- end }}
             {{- if eq $name "graphql-bff" }}
-            - { name: AUTH_MODE, value: {{ $g.authMode | default "cognito" }} }
+            - { name: AUTH_MODE, value: {{ $g.authMode | default "cognito" | quote }} }
             - { name: COGNITO_ISSUER, value: {{ $g.cognitoIssuer | quote }} }
             - { name: COGNITO_CLIENT_IDS, value: {{ $g.cognitoClientIds | quote }} }
             - { name: CORS_ORIGINS, value: {{ $g.corsOrigins | quote }} }
             - { name: FLAGS_API_URL, value: {{ $g.flagsApiUrl | quote }} }
-            - { name: QUERY_SERVICE_URL, value: http://query-projection:8000 }
-            - { name: ORCHESTRATOR_URL, value: http://saga-orchestrator:8000 }
-            - { name: LEGACY_CSMS_URL, value: http://legacy-csms:8000 }
-            - { name: RESERVATION_URL, value: http://station-reservation:8000 }
-            - { name: BILLING_URL, value: http://billing-wallet:8000 }
-            - { name: DISPATCH_URL, value: http://energy-dispatch:8000 }
+            - { name: QUERY_SERVICE_URL, value: "http://query-projection:8000" }
+            - { name: ORCHESTRATOR_URL, value: "http://saga-orchestrator:8000" }
+            - { name: LEGACY_CSMS_URL, value: "http://legacy-csms:8000" }
+            - { name: RESERVATION_URL, value: "http://station-reservation:8000" }
+            - { name: BILLING_URL, value: "http://billing-wallet:8000" }
+            - { name: DISPATCH_URL, value: "http://energy-dispatch:8000" }
             {{- end }}
             {{- range $k, $v := $svc.env }}
             - { name: {{ $k }}, value: {{ $v | quote }} }
