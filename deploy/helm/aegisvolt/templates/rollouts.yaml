@@ -80,7 +80,8 @@ spec:
             templates: [{ templateName: canary-error-rate-{{ $g.canary.provider }} }]
             args:
               - { name: service, value: {{ $svc.serviceName | quote }} }
-              - { name: canary-url, value: "http://{{ $name }}-canary:{{ $port }}/health/stats" }
+              # FQDN: el controlador de Argo Rollouts corre en otro namespace (argo-rollouts).
+              - { name: canary-url, value: "http://{{ $name }}-canary.{{ $root.Release.Namespace }}.svc.cluster.local:{{ $port }}/health/stats" }
               - { name: version, value: {{ $tag | quote }} }
         - setWeight: 100
       # Si el análisis falla: abort → todo el tráfico vuelve a la versión estable (rollback automático).
