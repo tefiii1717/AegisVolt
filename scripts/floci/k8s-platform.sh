@@ -30,13 +30,24 @@ aws eks update-kubeconfig --name "$CLUSTER" --alias "$CLUSTER" --profile "$PROFI
 kubectl config use-context "$CLUSTER"
 kubectl get nodes -o wide
 
-helm repo add argo https://argoproj.github.io/argo-helm >/dev/null
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/null
-helm repo add strimzi https://strimzi.io/charts/ >/dev/null
-helm repo update >/dev/null
-helm upgrade --install argo-rollouts argo/argo-rollouts --version 2.37.7 -n argo-rollouts --create-namespace --wait
-helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx --version 4.11.3 -n ingress-nginx --create-namespace \
-  --set controller.service.type=NodePort --wait
-helm upgrade --install strimzi strimzi/strimzi-kafka-operator --version 0.44.0 -n kafka --create-namespace \
-  --set 'watchNamespaces={kafka}' --wait
+# Los charts se descargan con curl por IPv4 y Helm instala desde el archivo local: evita que el
+# cliente HTTP de Helm se cuelgue con release-assets.githubusercontent.com en WSL2.
+CHARTS="${XDG_CACHE_HOME:-$HOME/.cache}/aegisvolt/charts"
+mkdir -p "$CHARTS"
+chart() {
+  local url="$1" file="$CHARTS/$(basename "$1")"
+  [[ -s "$file" ]] || curl -4 -fsSL --retry 3 --retry-delay 2 --max-time 120 -o "$file" "$url"
+  echo "$file"
+}
+
+helm upgrade --install argo-rollouts \
+  "$(chart https://github.com/argoproj/argo-helm/releases/download/argo-rollouts-2.37.7/argo-rollouts-2.37.7.tgz)" \
+  -n argo-rollouts --create-namespace --wait --timeout 10m
+helm upgrade --install ingress-nginx \
+  "$(chart https://github.com/kubernetes/ingress-nginx/releases/download/helm-chart-4.11.3/ingress-nginx-4.11.3.tgz)" \
+  -n ingress-nginx --create-namespace --set controller.service.type=NodePort --wait --timeout 10m
+helm upgrade --install strimzi \
+  "$(chart https://github.com/strimzi/strimzi-kafka-operator/releases/download/0.44.0/strimzi-kafka-operator-helm-3-chart-0.44.0.tgz)" \
+  -n kafka --create-namespace --set 'watchNamespaces={kafka}' --wait --timeout 10m
+kubectl get pods -A --no-headers | awk '{print $1, $2, $4}' | column -t
 echo "Clúster $CLUSTER listo. Configura en el GitHub Environment '$ENV': KUBE_CONTEXT=$CLUSTER"
