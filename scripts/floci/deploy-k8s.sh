@@ -67,7 +67,9 @@ case "$STEP" in
     for svc in station-reservation billing-wallet energy-dispatch saga-orchestrator query-projection; do
       set_tags+=(--set "services.$svc.replicas=${LOCAL_REPLICAS:-2}")
     done
-    helm upgrade --install aegisvolt deploy/helm/aegisvolt -n aegisvolt \
+    # --force-conflicts: Helm 4 aplica del lado del servidor y Argo Rollouts también escribe en los
+    # Rollouts (pasos del canary); Helm toma la propiedad de esos campos en cada despliegue.
+    helm upgrade --install aegisvolt deploy/helm/aegisvolt -n aegisvolt --force-conflicts \
       -f "deploy/helm/aegisvolt/values-$ENV.yaml" \
       --set global.registry=aegisvolt --set global.authMode=dev \
       --set global.awsEndpoint="$(floci_from_cluster)" \
