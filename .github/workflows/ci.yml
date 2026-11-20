@@ -72,7 +72,7 @@ jobs:
             echo "::group::$name"; docker buildx build --load -t "aegisvolt/$name:ci" -f "$file" "${build_args[@]}" "$ctx"; echo "::endgroup::"
           done
       - name: Helm lint del chart
-        uses: azure/setup-helm@fe7b79cd5ee1e45176fcad797de68ecaf3ca4814 # v4.2.0
+        uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
       - run: |
           for env in dev test prod; do helm lint deploy/helm/aegisvolt -f "deploy/helm/aegisvolt/values-$env.yaml"; done
           helm template aegisvolt deploy/helm/aegisvolt -f deploy/helm/aegisvolt/values-prod.yaml > /tmp/rendered.yaml
