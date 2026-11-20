@@ -1,5 +1,5 @@
 # Kafka de UN broker para el EKS emulado por Floci (un solo nodo k3s en el portátil).
-# Generado desde kafka.yaml: réplicas 1, RF 1, min.insync 1, 2 GiB.
+# Generado desde kafka.yaml: réplicas 1, RF 1, min.insync 1, almacenamiento efímero.
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
@@ -11,7 +11,8 @@ spec:
   roles: [controller, broker]
   storage:
     type: jbod
-    volumes: [{ id: 0, type: persistent-claim, size: 2Gi, deleteClaim: false, kraftMetadata: shared }]
+    # Efímero: el k3s de Floci no trae StorageClass (los PVC quedarían Pending). Basta para la demo local.
+    volumes: [{ id: 0, type: ephemeral, sizeLimit: 2Gi, kraftMetadata: shared }]
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
