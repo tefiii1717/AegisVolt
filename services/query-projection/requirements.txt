@@ -1,0 +1,1 @@
+# Dependencias propias del servicio (las comunes vienen de libs/aegis-common)

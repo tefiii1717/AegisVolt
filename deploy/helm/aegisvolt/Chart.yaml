@@ -1,0 +1,6 @@
+apiVersion: v2
+name: aegisvolt
+description: Microservicios de AegisVolt sobre EKS (Argo Rollouts canary, sidecars, NetworkPolicies)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

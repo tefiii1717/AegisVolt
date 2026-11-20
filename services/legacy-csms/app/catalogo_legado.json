@@ -1,0 +1,16 @@
+{
+  "estaciones": [
+    {"cod": "EST-BOG-080", "nom": "ELECTROLINERA CL 80", "mpio": "BOGOTA D.C.", "dir": "AV CL 80 69-70", "coord": "4.6927,-74.0832",
+     "conectores": [{"num": 1, "tipo": "CCS-2", "kw": "60"}, {"num": 2, "tipo": "CCS-2", "kw": "150"}, {"num": 3, "tipo": "T2", "kw": "22"}]},
+    {"cod": "EST-SIB-001", "nom": "HUB SIBERIA", "mpio": "COTA", "dir": "KM 3 VIA SIBERIA COTA", "coord": "4.7341,-74.1462",
+     "conectores": [{"num": 1, "tipo": "CCS-2", "kw": "120"}, {"num": 2, "tipo": "CCS-2", "kw": "180"}, {"num": 3, "tipo": "CCS-2", "kw": "180"}, {"num": 4, "tipo": "CHADEMO", "kw": "50"}]},
+    {"cod": "EST-FON-002", "nom": "TERMINAL FONTIBON", "mpio": "BOGOTA D.C.", "dir": "KR 100 25-90", "coord": "4.6741,-74.1428",
+     "conectores": [{"num": 1, "tipo": "CCS-2", "kw": "60"}, {"num": 2, "tipo": "CCS-2", "kw": "60"}]},
+    {"cod": "EST-ZFB-003", "nom": "ZONA FRANCA BTA", "mpio": "BOGOTA D.C.", "dir": "KR 106 15A-25", "coord": "4.6623,-74.1563",
+     "conectores": [{"num": 1, "tipo": "CCS-2", "kw": "150"}, {"num": 2, "tipo": "T2", "kw": "22"}]},
+    {"cod": "EST-CHI-004", "nom": "CHIA CENTRO LOG", "mpio": "CHIA", "dir": "VARIANTE CHIA CAJICA KM 1", "coord": "4.8619,-74.0326",
+     "conectores": [{"num": 1, "tipo": "CCS-2", "kw": "90"}, {"num": 2, "tipo": "CCS-2", "kw": "90"}]},
+    {"cod": "EST-USA-005", "nom": "USAQUEN ULT MILLA", "mpio": "BOGOTA D.C.", "dir": "CL 140 7-30", "coord": "4.7206,-74.0336",
+     "conectores": [{"num": 1, "tipo": "CCS-2", "kw": "60"}, {"num": 2, "tipo": "CCS-2", "kw": "350"}]}
+  ]
+}
