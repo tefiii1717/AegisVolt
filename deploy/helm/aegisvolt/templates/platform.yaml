@@ -109,15 +109,16 @@ data:
         Parser       json
         Refresh_Interval 2
         Mem_Buf_Limit 5MB
+    # El plugin C (cloudwatch_logs) siempre abre TLS hacia un endpoint propio, y
+    # Floci atiende HTTP plano: usamos el plugin Go (cloudwatch), que respeta el
+    # esquema http:// del endpoint. Se carga con -e /fluent-bit/cloudwatch.so.
     [OUTPUT]
-        Name              cloudwatch_logs
+        Name              cloudwatch
         Match             *
         region            ${AWS_REGION}
         log_group_name    ${LOG_GROUP}
         log_stream_name   ${POD_NAME}
-        endpoint          {{ $g.awsEndpoint | default "http://localhost:4566" | trimPrefix "http://" | trimPrefix "https://" | splitList ":" | first }}
-        port              {{ $g.awsEndpoint | default "http://localhost:4566" | splitList ":" | last }}
-        tls               Off
+        endpoint          {{ $g.awsEndpoint | default "http://localhost:4566" }}
         auto_create_group true
 ---
 # ---------- Aislamiento de red (zero-trust dentro del namespace) ----------
