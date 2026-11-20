@@ -5,14 +5,15 @@
 #   scripts/floci/deploy-k8s.sh dev images   # build local + importación al containerd del k3s
 #   scripts/floci/deploy-k8s.sh dev seed     # datos semilla en las tablas DynamoDB del ambiente
 #   scripts/floci/deploy-k8s.sh dev helm     # chart (Argo Rollouts); con imágenes nuevas → canary
+#   scripts/floci/deploy-k8s.sh dev e2e      # SAGA completa (feliz + rollback por flag) contra el clúster
 #   scripts/floci/deploy-k8s.sh dev status   # estado de pods y rollouts
 set -euo pipefail
-ENV="${1:?uso: deploy-k8s.sh <dev|test|prod> <check|kafka|images|seed|helm|status>}"
+ENV="${1:?uso: deploy-k8s.sh <dev|test|prod> <check|kafka|images|seed|helm|e2e|status>}"
 STEP="${2:?indica la etapa}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 CLUSTER="aegisvolt-$ENV"
-SERVICES=(station-reservation billing-wallet energy-dispatch saga-orchestrator query-projection legacy-csms graphql-bff)
+SERVICES=(station-reservation billing-wallet energy-dispatch saga-orchestrator query-projection legacy-csms flags-admin graphql-bff)
 kubectl config use-context "$CLUSTER" >/dev/null
 
 k3s_container() {
@@ -74,8 +75,15 @@ case "$STEP" in
       --set global.registry=aegisvolt --set global.authMode=dev \
       --set global.awsEndpoint="$(floci_from_cluster)" \
       --set global.kafkaBootstrap=aegisvolt-kafka-bootstrap.kafka.svc:9092 \
-      --set global.corsOrigins=http://localhost:5173 "${set_tags[@]}"
+      --set global.corsOrigins=http://localhost:5173 \
+      --set global.flagsApiUrl=http://flags-admin:8000 "${set_tags[@]}"
     kubectl get rollouts -n aegisvolt ;;
+  e2e)
+    # SAGA de punta a punta contra el BFF del clúster (port-forward) y las tablas DynamoDB del ambiente.
+    kubectl port-forward -n aegisvolt svc/graphql-bff 4000:4000 >/dev/null 2>&1 &
+    pf=$!; trap 'kill $pf 2>/dev/null' EXIT; sleep 3
+    docker run --rm --network host -v "$ROOT:/w:ro" -w /w -e E2E_ENV="$ENV" -e PYTHONDONTWRITEBYTECODE=1 \
+      python:3.12-slim sh -c "pip install -q pytest httpx boto3 2>/dev/null && pytest -q -p no:cacheprovider -m e2e tests/e2e -o addopts=''" ;;
   status)
     kubectl get pods -n aegisvolt -o wide --no-headers | awk '{print $1, $2, $3, $4}' | column -t
     kubectl get rollouts -n aegisvolt ;;

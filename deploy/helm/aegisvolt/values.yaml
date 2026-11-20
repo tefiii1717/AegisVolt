@@ -58,6 +58,12 @@ services:
     serviceName: legacy-csms
     replicas: 1              # el legado no escala horizontalmente (estado en memoria)
     canary: false
+  flags-admin:
+    serviceName: flags-admin
+    replicas: 1
+    canary: false            # adaptador HTTP de la Lambda (en AWS la sirve API Gateway privada)
+    env:
+      APP_MODULE: local_server:app
   graphql-bff:
     serviceName: graphql-bff
     port: 4000

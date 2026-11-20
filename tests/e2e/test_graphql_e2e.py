@@ -21,6 +21,7 @@ pytestmark = pytest.mark.e2e
 
 BFF = os.getenv("E2E_BFF_URL", "http://localhost:4000")
 DDB = os.getenv("E2E_DYNAMODB_ENDPOINT", "http://localhost:4566")
+ENV = os.getenv("E2E_ENV", "local")  # local = Compose; dev/test/prod = EKS emulado en Floci
 TX = "id state outcome failureReason amountCop compensations { action status refundedCop } steps { step status }"
 
 
@@ -101,8 +102,8 @@ def test_fallo_inducido_ejecuta_compensaciones(admin):
 
     ddb = boto3.client("dynamodb", endpoint_url=DDB, region_name="us-east-1",
                        aws_access_key_id="test", aws_secret_access_key="test")
-    hold = ddb.get_item(TableName="aegisvolt-billing-local", Key={"pk": {"S": f"HOLD#{saga_id}"}, "sk": {"S": "HOLD"}})
+    hold = ddb.get_item(TableName=f"aegisvolt-billing-{ENV}", Key={"pk": {"S": f"HOLD#{saga_id}"}, "sk": {"S": "HOLD"}})
     assert hold["Item"]["status"]["S"] == "RELEASED"
-    res = ddb.get_item(TableName="aegisvolt-reservations-local",
+    res = ddb.get_item(TableName=f"aegisvolt-reservations-{ENV}",
                        Key={"pk": {"S": f"RESERVATION#{saga_id}"}, "sk": {"S": "RESERVATION"}})
     assert res["Item"]["status"]["S"] == "RELEASED"
