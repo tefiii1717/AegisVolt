@@ -84,3 +84,6 @@ Consola web de Floci: `http://localhost:4566/_floci/ui`.
 | `dynamodb: DOWN` en readiness | NetworkPolicy solo permitía 443 | regla de salida al puerto de Floci |
 | AnalysisRun en `Error` | URL corta resuelta desde `argo-rollouts` | FQDN `<svc>-canary.aegisvolt.svc.cluster.local` |
 | Conflictos al aplicar el chart | Helm 4 (server-side apply) vs. Argo | `--force-conflicts` |
+| Fluent Bit: `tls: unexpected EOF` | el plugin C `cloudwatch_logs` fuerza TLS | plugin Go `cloudwatch` con `endpoint http://…:4566` |
+| `ERR_EMPTY_RESPONSE` en `localhost:5173` desde Windows | `localhost` → `::1` y la WSL sin IPv6 | abrir `http://127.0.0.1:5173`; túneles en `127.0.0.1` |
+| La UI no llega al BFF tras un `helm upgrade` | los `port-forward` mueren con su pod | `deploy-k8s.sh dev tunnels` |
