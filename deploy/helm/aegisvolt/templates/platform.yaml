@@ -143,6 +143,11 @@ spec:
       ports: [{ port: 9092 }]
     # VPC Endpoints (DynamoDB por prefix list, Logs/STS/execute-api por ENI): solo HTTPS
     - ports: [{ port: 443 }]
+    {{- if $g.awsEndpoint }}
+    # Floci (emulador de AWS) fuera del clúster: DynamoDB, CloudWatch Logs y la API de flags.
+    - to: [{ ipBlock: { cidr: "{{ $g.awsEndpoint | trimPrefix "http://" | trimPrefix "https://" | splitList ":" | first }}/32" } }]
+      ports: [{ port: {{ $g.awsEndpoint | splitList ":" | last | int }} }]
+    {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
