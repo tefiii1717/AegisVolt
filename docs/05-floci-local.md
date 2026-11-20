@@ -29,6 +29,15 @@ scripts/floci/terraform.sh dev restore <VERSION_ID>     # restaurar una versión
 
 # 5. Kubernetes del ambiente (EKS emulado) + Argo Rollouts, ingress-nginx y Strimzi
 scripts/floci/k8s-platform.sh dev
+
+# 6. AegisVolt en el clúster, por etapas
+scripts/floci/deploy-k8s.sh dev check    # los pods alcanzan a Floci
+scripts/floci/deploy-k8s.sh dev kafka    # Kafka de 1 broker + 11 tópicos
+scripts/floci/deploy-k8s.sh dev images   # build + importación al containerd del k3s
+scripts/floci/deploy-k8s.sh dev seed     # estaciones, billeteras y flags
+scripts/floci/deploy-k8s.sh dev helm     # chart; con imágenes nuevas → canary con análisis
+scripts/floci/deploy-k8s.sh dev e2e      # SAGA feliz + rollback por flag, verificada en DynamoDB
+kubectl argo rollouts list rollouts -n aegisvolt
 ```
 
 Consola web de Floci: `http://localhost:4566/_floci/ui`.
@@ -57,6 +66,21 @@ Consola web de Floci: `http://localhost:4566/_floci/ui`.
 | Análisis del canary | proveedor `web` (`/health/stats` del Service `-canary`) | `web` o `cloudwatch` |
 | Imágenes | build local por tag de contenido | ECR (bootstrap con `create_ecr = true`) |
 
-Pendiente de verificar en tu máquina: `k8s-platform.sh` (acceso al k3s con la access key del
-emulador) y el despliegue del chart sobre ese clúster; el CI no lo ejercita porque requiere un
-clúster persistente.
+## Verificado en WSL2 (20/11/2026)
+
+- 134 recursos en `dev`, 5 versiones del tfstate en `env:/dev/`.
+- EKS emulado con nodo k3s `Ready`; Argo Rollouts, ingress-nginx y Strimzi en `Running`.
+- 8 servicios `Healthy`; canary al 20 % con `AnalysisRun Successful` (3 mediciones) y un aborto
+  real con rollback automático cuando el análisis no pudo medir.
+- E2E en el clúster: `3 passed` (scopes, SAGA completa y compensación con la flag de falla).
+
+## Problemas conocidos y su solución
+
+| Síntoma | Causa | Solución aplicada |
+|---|---|---|
+| Helm se cuelga descargando charts | WSL2 sin salida IPv6 | IPv6 desactivado en WSL2 y charts por `curl -4` |
+| Kafka `Pending` | el k3s de Floci no trae StorageClass | almacenamiento efímero (`kafka-single-node.yaml`) |
+| Pods reiniciados por la startup probe | el arranque esperaba a Kafka | conexión a Kafka en segundo plano |
+| `dynamodb: DOWN` en readiness | NetworkPolicy solo permitía 443 | regla de salida al puerto de Floci |
+| AnalysisRun en `Error` | URL corta resuelta desde `argo-rollouts` | FQDN `<svc>-canary.aegisvolt.svc.cluster.local` |
+| Conflictos al aplicar el chart | Helm 4 (server-side apply) vs. Argo | `--force-conflicts` |
