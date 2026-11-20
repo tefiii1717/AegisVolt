@@ -87,7 +87,7 @@ jobs:
             file=$(jq -r .dockerfile <<<"$img"); args=$(jq -r .args <<<"$img")
             read -r -a paths <<<"$(jq -r .paths <<<"$img")"
             tag=$(scripts/ci/image-tag.sh "${paths[@]}")
-            ref="${REGISTRY:-aegisvolt}/aegisvolt/$name:$tag"
+            ref="${REGISTRY:-aegisvolt}/$name:$tag"
             if docker image inspect "$ref" >/dev/null 2>&1; then
               echo "♻ $ref ya existe → se reutiliza la misma imagen del ambiente anterior"
             else
@@ -128,7 +128,7 @@ jobs:
           for svc in $(jq -r 'keys[]' <<<"$TAGS"); do set_tags+=(--set "services.$svc.imageTag=$(jq -r --arg s "$svc" '.[$s]' <<<"$TAGS")"); done
           helm upgrade --install aegisvolt deploy/helm/aegisvolt -n aegisvolt \
             -f "deploy/helm/aegisvolt/values-$TARGET_ENV.yaml" \
-            --set global.registry="${REGISTRY:-aegisvolt}/aegisvolt" \
+            --set global.registry="${REGISTRY:-aegisvolt}" \
             --set global.awsEndpoint="$FLOCI_IN_CLUSTER" "${set_tags[@]}"
       - name: Esperar el análisis del canary (rollback automático si falla)
         run: |

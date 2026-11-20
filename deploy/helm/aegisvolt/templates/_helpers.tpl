@@ -13,6 +13,8 @@ app.kubernetes.io/name: {{ .name }}
 allowPrivilegeEscalation: false
 readOnlyRootFilesystem: true
 runAsNonRoot: true
+runAsUser: 10001
+runAsGroup: 10001
 capabilities: { drop: ["ALL"] }
 seccompProfile: { type: RuntimeDefault }
 {{- end -}}

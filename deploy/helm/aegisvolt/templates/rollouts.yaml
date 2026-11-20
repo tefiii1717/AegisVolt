@@ -170,7 +170,7 @@ spec:
             - { name: OUTBOX_RELAY_MODE, value: {{ ternary "sidecar" "off" (default false $svc.outbox) }} }
             {{- end }}
             {{- if eq $name "graphql-bff" }}
-            - { name: AUTH_MODE, value: cognito }
+            - { name: AUTH_MODE, value: {{ $g.authMode | default "cognito" }} }
             - { name: COGNITO_ISSUER, value: {{ $g.cognitoIssuer | quote }} }
             - { name: COGNITO_CLIENT_IDS, value: {{ $g.cognitoClientIds | quote }} }
             - { name: CORS_ORIGINS, value: {{ $g.corsOrigins | quote }} }
