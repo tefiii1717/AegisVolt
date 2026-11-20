@@ -80,8 +80,14 @@ case "$STEP" in
     kubectl get rollouts -n aegisvolt ;;
   e2e)
     # SAGA de punta a punta contra el BFF del clúster (port-forward) y las tablas DynamoDB del ambiente.
-    kubectl port-forward -n aegisvolt svc/graphql-bff 4000:4000 >/dev/null 2>&1 &
-    pf=$!; trap 'kill $pf 2>/dev/null' EXIT; sleep 3
+    # El port-forward se ata a UN pod: si el BFF está en pleno canary, ese pod puede desaparecer.
+    echo "Esperando a que el BFF termine su rollout..."
+    kubectl argo rollouts status graphql-bff -n aegisvolt --timeout 10m
+    kubectl port-forward -n aegisvolt svc/graphql-bff 4000:4000 >/tmp/aegis-pf.log 2>&1 &
+    pf=$!; trap 'kill $pf 2>/dev/null' EXIT
+    for _ in $(seq 1 30); do curl -fs http://localhost:4000/health/live >/dev/null && break; sleep 1; done
+    curl -fs http://localhost:4000/health/live >/dev/null || { echo "el port-forward no responde:"; cat /tmp/aegis-pf.log; exit 1; }
+    echo "BFF accesible en localhost:4000; ejecutando la SAGA de punta a punta..."
     docker run --rm --network host -v "$ROOT:/w:ro" -w /w -e E2E_ENV="$ENV" -e PYTHONDONTWRITEBYTECODE=1 \
       python:3.12-slim sh -c "pip install -q pytest httpx boto3 2>/dev/null && pytest -q -p no:cacheprovider -m e2e tests/e2e -o addopts=''" ;;
   status)
