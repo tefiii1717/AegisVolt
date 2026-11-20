@@ -40,6 +40,7 @@ class ServiceRuntime:
         self.relay: OutboxRelay | None = None
         self.subscriber: KafkaSubscriber | None = None
         self.started_at = time.time()
+        self.bus_ready = False
         self._tasks: list[asyncio.Task] = []
 
     def create_app(self, *, title: str, topics: list[str] | None = None, handler: Handler | None = None,
@@ -47,22 +48,32 @@ class ServiceRuntime:
                    publishes: bool = True) -> FastAPI:
         s = self.settings
 
-        @asynccontextmanager
-        async def lifespan(_: FastAPI):
+        async def connect_and_start() -> None:
+            """Conecta a Kafka EN SEGUNDO PLANO: el HTTP (/health/live) responde de inmediato y
+            /health/ready refleja si ya hay conexión. Bloquear el arranque hacía que Kubernetes
+            matara el pod (startup probe) mientras Kafka aún no estaba disponible."""
             if publishes or topics:
-                for attempt in range(1, 31):
+                attempt = 0
+                while True:
+                    attempt += 1
                     try:
                         await self.bus.start()
                         break
                     except Exception:  # noqa: BLE001
                         log.warning("Kafka no disponible al iniciar", extra={"attempt": attempt})
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(min(2 * attempt, 15))
+            self.bus_ready = True
             if publishes and s.outbox_relay_mode == "inprocess" and s.table_name:
                 self.relay = OutboxRelay(self.client, s.table_name, self.bus)
                 self._tasks.append(asyncio.create_task(self.relay.run_forever(s.outbox_poll_interval_s)))
             if topics and handler:
                 self.subscriber = KafkaSubscriber(s.kafka_bootstrap, s.group_id, topics, handler, self.bus)
                 self._tasks.append(asyncio.create_task(self.subscriber.run()))
+            log.info("servicio conectado a Kafka", extra={"topics": topics or [], "relay": s.outbox_relay_mode})
+
+        @asynccontextmanager
+        async def lifespan(_: FastAPI):
+            self._tasks.append(asyncio.create_task(connect_and_start()))
             for task in background or []:
                 self._tasks.append(asyncio.create_task(task(self)))
             log.info("servicio iniciado", extra={"topics": topics or [], "relay": s.outbox_relay_mode})
@@ -103,8 +114,10 @@ class ServiceRuntime:
                     checks["dynamodb"] = "UP"
                 except Exception:  # noqa: BLE001
                     checks["dynamodb"] = "DOWN"
-            if self.subscriber is not None:
-                checks["kafka_consumer"] = "UP" if self.subscriber.healthy else "DOWN"
+            if publishes or topics:
+                checks["kafka"] = "UP" if self.bus_ready else "DOWN"
+            if topics and handler:
+                checks["kafka_consumer"] = "UP" if self.subscriber is not None and self.subscriber.healthy else "DOWN"
             ok = all(v == "UP" for v in checks.values())
             return JSONResponse({"status": "UP" if ok else "DOWN", "checks": checks}, status_code=200 if ok else 503)
 
