@@ -1,0 +1,10 @@
+global:
+  environment: dev
+  canary: { weight: 20, pauseSeconds: 30, maxErrors: 5 }
+services:
+  station-reservation: { replicas: 5 }
+  billing-wallet: { replicas: 5 }
+  energy-dispatch: { replicas: 5 }
+  saga-orchestrator: { replicas: 5 }
+  query-projection: { replicas: 5 }
+  graphql-bff: { replicas: 2 }

@@ -1,0 +1,8 @@
+global:
+  environment: prod
+  canary: { weight: 10, pauseSeconds: 120, maxErrors: 1 }
+services:
+  graphql-bff: { replicas: 4 }
+resources:
+  requests: { cpu: 100m, memory: 192Mi }
+  limits: { cpu: "1", memory: 384Mi }

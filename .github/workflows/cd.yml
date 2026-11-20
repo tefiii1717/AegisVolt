@@ -1,0 +1,147 @@
+# CD post-merge: al fusionar un PR en dev, test o prod se despliega SOLO ese ambiente, en Floci.
+#
+# Detección dinámica del ambiente: github.ref_name es la rama que recibió el merge
+# (refs/heads/test → "test"). Ese valor elige el GitHub Environment, el workspace de Terraform
+# y los values de Helm.
+#
+# ¿Dónde corre? Variable de repositorio DEPLOY_RUNS_ON:
+#   - sin definir → "ubuntu-latest": Floci efímero (sirve como verificación; el estado no persiste).
+#   - '["self-hosted","floci"]' → runner propio (WSL2) con Floci persistente y un clúster local:
+#     los ambientes y el historial del tfstate quedan vivos para la demo (ver docs/05-floci-local.md).
+name: cd
+
+on:
+  push:
+    branches: [dev, test, prod]
+
+permissions:
+  contents: read
+
+# Nunca dos despliegues simultáneos al mismo ambiente (el estado además tiene lock en DynamoDB).
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: resolve-environment
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.env.outputs.env }}
+    steps:
+      - id: env
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          case "$BRANCH" in dev|test|prod) echo "env=$BRANCH" >> "$GITHUB_OUTPUT" ;; *) echo "::error::rama no desplegable"; exit 1 ;; esac
+
+  terraform-apply:
+    name: terraform-apply
+    needs: resolve
+    runs-on: ${{ fromJSON(vars.DEPLOY_RUNS_ON || '"ubuntu-latest"') }}
+    environment: ${{ needs.resolve.outputs.env }}   # prod puede exigir revisor en el GitHub Environment
+    env:
+      TARGET_ENV: ${{ needs.resolve.outputs.env }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with: { terraform_version: "1.10.5", terraform_wrapper: false }
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with: { python-version: "3.12" }
+      - name: Floci arriba (persistente en runner propio)
+        run: scripts/floci/terraform.sh up
+      - name: Bootstrap del estado (idempotente)
+        run: scripts/floci/terraform.sh bootstrap
+      - name: terraform apply en el workspace detectado
+        run: |
+          echo "Aplicando SOLO el ambiente: $TARGET_ENV"
+          scripts/floci/terraform.sh "$TARGET_ENV" apply
+      - name: Datos semilla idempotentes (estaciones, billeteras, flags)
+        env:
+          DYNAMODB_ENDPOINT: http://localhost:4566
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+        run: |
+          pip install -e libs/aegis-common
+          python scripts/bootstrap.py --env "$TARGET_ENV"
+      - name: Evidencia - historial de versiones del tfstate
+        run: scripts/floci/terraform.sh "$TARGET_ENV" versions
+
+  build-images:
+    name: build-images
+    needs: resolve
+    runs-on: ${{ fromJSON(vars.DEPLOY_RUNS_ON || '"ubuntu-latest"') }}
+    outputs:
+      tags: ${{ steps.build.outputs.tags }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Construir solo lo que cambió (tags por contenido → promoción sin recompilar)
+        id: build
+        env:
+          REGISTRY: ${{ vars.IMAGE_REGISTRY }}   # p. ej. localhost:5001 (registro del clúster k3d); vacío = solo build local
+        run: |
+          set -euo pipefail
+          tags="{}"
+          while read -r img; do
+            name=$(jq -r .name <<<"$img"); ctx=$(jq -r .context <<<"$img")
+            file=$(jq -r .dockerfile <<<"$img"); args=$(jq -r .args <<<"$img")
+            read -r -a paths <<<"$(jq -r .paths <<<"$img")"
+            tag=$(scripts/ci/image-tag.sh "${paths[@]}")
+            ref="${REGISTRY:-aegisvolt}/$name:$tag"
+            if docker image inspect "$ref" >/dev/null 2>&1; then
+              echo "♻ $ref ya existe → se reutiliza la misma imagen del ambiente anterior"
+            else
+              build_args=(); [[ -n "$args" ]] && build_args=(--build-arg "$args")
+              docker build --build-arg "APP_VERSION=$tag" "${build_args[@]}" -t "$ref" -f "$file" "$ctx"
+              [[ -n "${REGISTRY:-}" ]] && docker push "$ref"
+            fi
+            tags=$(jq -c --arg n "$name" --arg t "$tag" '. + {($n): $t}' <<<"$tags")
+          done < <(jq -c '.[]' scripts/ci/images.json)
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+  deploy-k8s:
+    name: deploy-canary
+    needs: [resolve, terraform-apply, build-images]
+    # Requiere un clúster: el k3s de EKS en Floci o un k3d local (variable KUBE_CONTEXT en el Environment).
+    if: ${{ vars.KUBE_CONTEXT != '' }}
+    runs-on: ${{ fromJSON(vars.DEPLOY_RUNS_ON || '"ubuntu-latest"') }}
+    environment: ${{ needs.resolve.outputs.env }}
+    env:
+      TARGET_ENV: ${{ needs.resolve.outputs.env }}
+      TAGS: ${{ needs.build-images.outputs.tags }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: azure/setup-helm@fe7b79cd5ee1e45176fcad797de68ecaf3ca4814 # v4.2.0
+        with: { version: v4.3.2 }   # Helm 4: server-side apply (--force-conflicts)
+      - name: Plataforma (namespace restringido y Kafka/Strimzi)
+        env:
+          KUBE_CONTEXT: ${{ vars.KUBE_CONTEXT }}
+        run: |
+          kubectl config use-context "$KUBE_CONTEXT"
+          kubectl apply -f deploy/k8s/platform/namespace.yaml
+          kubectl apply -f deploy/k8s/platform/kafka.yaml
+      - name: helm upgrade → Argo Rollouts inicia el canary en los servicios que cambiaron
+        env:
+          REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          FLOCI_IN_CLUSTER: ${{ vars.FLOCI_ENDPOINT_IN_CLUSTER }}   # p. ej. http://host.k3d.internal:4566
+        run: |
+          set -euo pipefail
+          set_tags=()
+          for svc in $(jq -r 'keys[]' <<<"$TAGS"); do set_tags+=(--set "services.$svc.imageTag=$(jq -r --arg s "$svc" '.[$s]' <<<"$TAGS")"); done
+          helm upgrade --install aegisvolt deploy/helm/aegisvolt -n aegisvolt --force-conflicts \
+            -f "deploy/helm/aegisvolt/values-$TARGET_ENV.yaml" \
+            --set global.registry="${REGISTRY:-aegisvolt}" \
+            --set global.awsEndpoint="$FLOCI_IN_CLUSTER" "${set_tags[@]}"
+      - name: Esperar el análisis del canary (rollback automático si falla)
+        run: |
+          set -euo pipefail
+          for r in $(kubectl get rollouts -n aegisvolt -o name); do
+            name="${r#*/}"
+            echo "::group::$name"
+            if ! kubectl argo rollouts status "$name" -n aegisvolt --timeout 15m; then
+              kubectl argo rollouts get rollout "$name" -n aegisvolt
+              echo "::error::El canary de $name falló el análisis: Argo Rollouts revirtió a la versión estable."
+              exit 1
+            fi
+            echo "::endgroup::"
+          done

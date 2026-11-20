@@ -1,0 +1,10 @@
+window.__AEGIS_CONFIG__ = {
+  environment: '${AEGIS_ENV}',
+  graphqlUrl: '${GRAPHQL_URL}',
+  authMode: '${AUTH_MODE}',
+  devTokenUrl: '${DEV_TOKEN_URL}',
+  cognitoDomain: '${COGNITO_DOMAIN}',
+  cognitoClientId: '${COGNITO_CLIENT_ID}',
+  redirectUri: '${REDIRECT_URI}',
+  pollMs: ${POLL_MS},
+};

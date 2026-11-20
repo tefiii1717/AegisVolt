@@ -1,0 +1,13 @@
+# Une el target group del NLB interno (creado por Terraform) con los pods de ingress-nginx.
+# El pipeline reemplaza ${BFF_TARGET_GROUP_ARN} con `terraform output -raw bff_target_group_arn`.
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: ingress-nginx
+  namespace: ingress-nginx
+spec:
+  serviceRef:
+    name: ingress-nginx-controller
+    port: 80
+  targetGroupARN: ${BFF_TARGET_GROUP_ARN}
+  targetType: ip
