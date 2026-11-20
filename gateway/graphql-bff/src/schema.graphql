@@ -1,0 +1,176 @@
+"""
+AegisVolt — esquema unificado (Backend-for-Frontend).
+Queries → modelo de LECTURA (CQRS, query-projection). Mutations → lado de ESCRITURA (saga-orchestrator).
+Cada campo exige un scope OAuth2 (ver comentarios @scope).
+"""
+type Query {
+  "@scope: ninguno (requiere token válido)"
+  viewer: Viewer!
+  "@scope: ninguno"
+  environment: EnvironmentInfo!
+  "@scope: aegisvolt/stations.read — Strangler Fig: core (CQRS) o legado vía ACL según flag"
+  stations(city: String): [Station!]!
+  "@scope: aegisvolt/stations.read"
+  station(id: ID!): Station
+  "@scope: aegisvolt/transactions.read"
+  fleets: [Fleet!]!
+  "@scope: aegisvolt/transactions.read"
+  transactions(limit: Int = 20): [SagaTransaction!]!
+  "@scope: aegisvolt/transactions.read — read-your-writes: si aún no está proyectada se consulta el log de SAGA"
+  transaction(id: ID!): SagaTransaction
+  "@scope: ninguno — estado de flags del ambiente actual"
+  featureFlags: [FeatureFlag!]!
+  "@scope: aegisvolt/transactions.read"
+  platformHealth: [ServiceHealth!]!
+}
+
+type Mutation {
+  "@scope: aegisvolt/reservations.write — dispara la SAGA Reservar y Activar Carga (asíncrona, 202)"
+  reserveAndCharge(input: ReserveAndChargeInput!): ReserveAndChargePayload!
+  "@scope: aegisvolt/flags.admin — cambia una flag SIN redesplegar (Lambda flags-admin)"
+  setFeatureFlag(name: String!, enabled: Boolean!): FeatureFlag!
+}
+
+type Subscription {
+  "Disponible en local vía SSE. Detrás de AWS API Gateway (sin streaming) la UI usa polling."
+  transactionUpdated(id: ID!): SagaTransaction!
+}
+
+enum DataSource { CORE LEGACY_ACL }
+enum ConnectorStatus { AVAILABLE RESERVED CHARGING OUT_OF_SERVICE UNKNOWN }
+enum SagaState {
+  RESERVING
+  AUTHORIZING_FUNDS
+  STARTING_CHARGE
+  CAPTURING
+  COMPLETED
+  COMPENSATING_FUNDS
+  COMPENSATING_RESERVATION
+  COMPENSATED
+  FAILED
+}
+
+type Station {
+  id: ID!
+  name: String!
+  city: String!
+  address: String
+  lat: Float
+  lng: Float
+  mapX: Float!
+  mapY: Float!
+  emoji: String
+  source: DataSource!
+  availableConnectors: Int!
+  connectors: [Connector!]!
+}
+
+type Connector {
+  id: ID!
+  type: String!
+  powerKw: Float!
+  tier: String!
+  status: ConnectorStatus!
+  sagaId: String
+  lastPowerKw: Float
+  energyKwh: Float
+  socPercent: Float
+  telemetryAt: String
+}
+
+type Fleet {
+  id: ID!
+  name: String
+  availableCop: Int!
+  heldCop: Int!
+  capturedCop: Int!
+}
+
+type SagaTransaction {
+  id: ID!
+  state: SagaState!
+  isTerminal: Boolean!
+  outcome: String!
+  fleetId: String!
+  vehicleId: String
+  stationId: String!
+  connectorId: String!
+  estimatedKwh: Float!
+  powerKw: Float
+  amountCop: Int
+  surgeApplied: Boolean
+  failureReason: String
+  stuck: Boolean
+  createdAt: String!
+  updatedAt: String!
+  steps: [SagaStep!]!
+  compensations: [Compensation!]!
+}
+
+type SagaStep {
+  step: String!
+  status: String!
+  at: String
+  "JSON serializado con el detalle de la respuesta del servicio"
+  detail: String
+}
+
+type Compensation {
+  action: String!
+  status: String!
+  at: String
+  refundedCop: Int
+}
+
+type FeatureFlag {
+  name: String!
+  enabled: Boolean!
+  description: String
+  environment: String!
+  prodLocked: Boolean!
+  updatedAt: String
+  updatedBy: String
+}
+
+type EnvironmentInfo {
+  name: String!
+  version: String!
+  region: String!
+  authMode: String!
+}
+
+type Viewer {
+  subject: String!
+  role: String
+  scopes: [String!]!
+}
+
+type CircuitBreakerInfo {
+  name: String!
+  state: String!
+  failures: Int!
+  rejected: Int!
+}
+
+type ServiceHealth {
+  service: String!
+  status: String!
+  version: String
+  circuitBreakers: [CircuitBreakerInfo!]!
+}
+
+input ReserveAndChargeInput {
+  fleetId: String!
+  stationId: String!
+  connectorId: String!
+  vehicleId: String!
+  estimatedKwh: Float!
+  fastCharge: Boolean = false
+  "Evita SAGAs duplicadas por doble clic / reintentos de red"
+  idempotencyKey: String
+}
+
+type ReserveAndChargePayload {
+  accepted: Boolean!
+  transaction: SagaTransaction!
+}

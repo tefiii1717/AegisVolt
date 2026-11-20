@@ -1,0 +1,79 @@
+[
+  {
+"name": "station-reservation",
+"context": ".",
+"dockerfile": "deploy/docker/python-service.Dockerfile",
+"args": "SERVICE_DIR=services/station-reservation",
+"paths": "services/station-reservation libs/aegis-common deploy/docker"
+},
+  {
+"name": "billing-wallet",
+"context": ".",
+"dockerfile": "deploy/docker/python-service.Dockerfile",
+"args": "SERVICE_DIR=services/billing-wallet",
+"paths": "services/billing-wallet libs/aegis-common deploy/docker"
+},
+  {
+"name": "energy-dispatch",
+"context": ".",
+"dockerfile": "deploy/docker/python-service.Dockerfile",
+"args": "SERVICE_DIR=services/energy-dispatch",
+"paths": "services/energy-dispatch libs/aegis-common deploy/docker"
+},
+  {
+"name": "saga-orchestrator",
+"context": ".",
+"dockerfile": "deploy/docker/python-service.Dockerfile",
+"args": "SERVICE_DIR=services/saga-orchestrator",
+"paths": "services/saga-orchestrator libs/aegis-common deploy/docker"
+},
+  {
+"name": "query-projection",
+"context": ".",
+"dockerfile": "deploy/docker/python-service.Dockerfile",
+"args": "SERVICE_DIR=services/query-projection",
+"paths": "services/query-projection libs/aegis-common deploy/docker"
+},
+  {
+"name": "legacy-csms",
+"context": ".",
+"dockerfile": "deploy/docker/python-service.Dockerfile",
+"args": "SERVICE_DIR=services/legacy-csms",
+"paths": "services/legacy-csms libs/aegis-common deploy/docker"
+},
+  {
+"name": "flags-admin",
+"context": ".",
+"dockerfile": "deploy/docker/python-service.Dockerfile",
+"args": "SERVICE_DIR=serverless/flags-admin",
+"paths": "serverless/flags-admin libs/aegis-common deploy/docker"
+},
+  {
+"name": "graphql-bff",
+"context": "gateway/graphql-bff",
+"dockerfile": "gateway/graphql-bff/Dockerfile",
+"args": "",
+"paths": "gateway/graphql-bff"
+},
+  {
+"name": "frontend",
+"context": "frontend",
+"dockerfile": "frontend/Dockerfile",
+"args": "",
+"paths": "frontend"
+},
+  {
+"name": "acl-ocpp-translator",
+"context": "streams/acl-ocpp-translator",
+"dockerfile": "streams/acl-ocpp-translator/Dockerfile",
+"args": "",
+"paths": "streams/acl-ocpp-translator"
+},
+  {
+"name": "prefect-flows",
+"context": "observability/prefect",
+"dockerfile": "observability/prefect/Dockerfile",
+"args": "",
+"paths": "observability/prefect"
+}
+]

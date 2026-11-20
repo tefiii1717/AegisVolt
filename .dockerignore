@@ -1,0 +1,14 @@
+**/.git
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/dist
+**/target
+**/.terraform
+**/*.tfstate*
+**/.env
+**/.env.*
+infra/
+docs/
+frontend/node_modules

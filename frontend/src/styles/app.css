@@ -1,0 +1,139 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/nunito-sans';
+@import '@fontsource-variable/big-shoulders-display';
+@import './uiverse-truck.css';
+
+/* ---------- Tokens (inspirados en las referencias: revista Colombiabus, carretera ilustrada, apps de viaje) ---------- */
+@theme {
+  --color-paramo: #e4f3f0;      /* fondo menta del páramo */
+  --color-paramo-deep: #cfe9e3;
+  --color-andes: #13233a;       /* tinta navy de la portada */
+  --color-andes-soft: #2a3d57;
+  --color-pine: #2f6b4f;        /* verde pino de la carretera */
+  --color-pine-soft: #dcefe5;
+  --color-charge: #ee8f3a;      /* naranja CTA ("Book now") */
+  --color-charge-deep: #c96d1c;
+  --color-sky: #f6dcc0;         /* cielo durazno del amanecer */
+  --color-river: #90daee;
+  --color-volt: #2b8fb3;        /* cargando */
+  --color-amber: #e7b236;       /* reservado */
+  --color-coral: #e2574c;       /* error / compensación */
+  --color-flag-yellow: #fcd116;
+  --color-flag-blue: #003893;
+  --color-flag-red: #ce1126;
+
+  --font-display: 'Big Shoulders Display Variable', 'Arial Narrow', sans-serif;
+  --font-sans: 'Nunito Sans Variable', 'Segoe UI', system-ui, sans-serif;
+
+  --radius-card: 1.75rem;
+  --radius-chip: 0.85rem;
+}
+
+@layer base {
+  html { background: var(--color-paramo); color: var(--color-andes); font-family: var(--font-sans); }
+  body { min-height: 100dvh; font-size: 1rem; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  h1, h2, h3 { font-family: var(--font-display); font-weight: 900; letter-spacing: 0.01em; line-height: 0.95; }
+  :focus-visible { outline: 3px solid var(--color-charge); outline-offset: 3px; border-radius: 0.5rem; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+}
+
+/* ---------- Superficies ---------- */
+.surface { background: #fff; border-radius: var(--radius-card); box-shadow: 0 1px 0 rgba(19, 35, 58, 0.06), 0 18px 40px -24px rgba(19, 35, 58, 0.35); }
+.surface-quiet { background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(19, 35, 58, 0.08); border-radius: 1.25rem; }
+.btn-charge { background: var(--color-charge); color: #fff; font-weight: 800; border-radius: 1rem; padding: 0.85rem 1.4rem; transition: background 0.15s, transform 0.15s; }
+.btn-charge:hover:not(:disabled) { background: var(--color-charge-deep); }
+.btn-charge:active:not(:disabled) { transform: translateY(1px); }
+.btn-charge:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-ghost { border-radius: 0.9rem; padding: 0.55rem 0.95rem; font-weight: 700; color: var(--color-andes); background: rgba(19, 35, 58, 0.06); }
+.btn-ghost:hover { background: rgba(19, 35, 58, 0.11); }
+
+/* ---------- Mapa de estaciones — adaptado de Uiverse.io por SnyDeTreves (white-newt-65), MIT ---------- */
+.av-map { --city-radius: 1.6rem; position: relative; aspect-ratio: 1; width: 100%; border-radius: var(--radius-card); overflow: visible; }
+.av-map__bg { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; }
+.av-map__pin {
+  position: absolute; left: calc(var(--x) * 1% - var(--city-radius)); top: calc(var(--y) * 1% - var(--city-radius));
+  padding: var(--city-radius); border-radius: var(--city-radius); background: none; border: 0; cursor: pointer; z-index: 2;
+}
+.av-map__pin::before { /* punto de estado */
+  content: ''; position: absolute; left: calc(50% - 0.45rem); top: calc(50% - 0.45rem); width: 0.9rem; height: 0.9rem;
+  border-radius: 999px; background: var(--pin, var(--color-pine)); border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.av-map__pin::after { content: '📍'; position: absolute; left: 0; width: 100%; text-align: center; top: calc(-0.9em + var(--city-radius));
+  font-size: 1.15rem; clip-path: inset(-0.5em 0 0 0); transition: transform 300ms ease-out, clip-path 300ms ease-out; }
+.av-map__pin:hover::after, .av-map__pin:focus-visible::after, .av-map__pin[aria-pressed='true']::after { clip-path: inset(-0.5em 0 0.5em 0); transform: translateY(0.5em); }
+.av-map__label { display: none; position: absolute; left: calc(50% - 6rem); width: 12rem; top: calc(var(--city-radius) + 0.7rem); text-align: center; z-index: 10; pointer-events: none; }
+.av-map__pin:hover .av-map__label, .av-map__pin:focus-visible .av-map__label, .av-map__pin[aria-pressed='true'] .av-map__label { display: block; animation: av-fadein 250ms ease-out both; }
+.av-map__sign { display: inline-flex; gap: 0.35em; align-items: center; background: var(--pin, var(--color-pine)); color: #fff; font-weight: 800;
+  font-size: 0.8rem; padding: 0.35em 0.6em; border-radius: 0.35rem; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); white-space: nowrap; }
+.av-map__sign::before { content: attr(data-icon); }
+@keyframes av-fadein { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* ---------- Resumen de reserva — adaptado de Uiverse.io por SSpisso (kind-cobra-45), MIT ---------- */
+.av-checkout { display: grid; }
+.av-checkout__card { background: #fffaf0; box-shadow: 0 47px 47px rgba(0, 0, 0, 0.05), 0 12px 26px rgba(0, 0, 0, 0.1); }
+.av-checkout__cart { border-radius: 1.4rem 1.4rem 0 0; }
+.av-checkout__title { display: flex; align-items: center; height: 3rem; padding-left: 1.4rem; border-bottom: 1px solid rgba(47, 107, 79, 0.45); font-weight: 800; }
+.av-checkout__steps { display: grid; gap: 0.9rem; padding: 1.25rem 1.4rem; }
+.av-checkout hr { height: 1px; border: 0; background: rgba(47, 107, 79, 0.35); }
+.av-checkout__section-label { font-size: 0.85rem; font-weight: 800; margin-bottom: 0.35rem; display: block; }
+.av-checkout__details { display: grid; grid-template-columns: 1fr auto; gap: 0.3rem 1rem; font-size: 0.92rem; }
+.av-checkout__details dd { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.av-checkout__footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.9rem 1rem 0.9rem 1.4rem;
+  background: var(--color-pine-soft); border-radius: 0 0 1.4rem 1.4rem; }
+.av-checkout__price { font-family: var(--font-display); font-weight: 900; font-size: 2rem; font-variant-numeric: tabular-nums; }
+.av-field { width: 100%; height: 2.6rem; padding: 0 0.8rem; border-radius: 0.6rem; border: 1px solid var(--color-pine); background: #fbf3e4;
+  transition: all 0.3s cubic-bezier(0.15, 0.83, 0.66, 1); }
+.av-field:focus { outline: none; border-color: transparent; box-shadow: 0 0 0 2px var(--color-charge); background: #fff; }
+
+/* ---------- Batería cargando — adaptado de Uiverse.io por doniaskima (itchy-baboon-21), MIT ---------- */
+.av-battery {
+  width: 80px; height: 40px; color: var(--color-pine); border: 2px solid currentColor; border-right-color: transparent; padding: 3px;
+  background: repeating-linear-gradient(90deg, currentColor 0 10px, #0000 0 15px) 0/0% no-repeat content-box content-box;
+  position: relative; animation: av-battery 2s infinite steps(6);
+}
+.av-battery::before {
+  content: ''; position: absolute; top: -2px; bottom: -2px; left: 100%; width: 10px;
+  background:
+    linear-gradient(#0000 calc(50% - 7px), currentColor 0 calc(50% - 5px), #0000 0 calc(50% + 5px), currentColor 0 calc(50% + 7px), #0000 0) left/100% 100%,
+    linear-gradient(currentColor calc(50% - 5px), #0000 0 calc(50% + 5px), currentColor 0) left/2px 100%,
+    linear-gradient(#0000 calc(50% - 5px), currentColor 0 calc(50% + 5px), #0000 0) right/2px 100%;
+  background-repeat: no-repeat;
+}
+@keyframes av-battery { 100% { background-size: 120%; } }
+
+/* ---------- Aviso de éxito — adaptado de Uiverse.io por akshat-patel28 (quick-baboon-29), MIT ---------- */
+.av-toast { position: relative; overflow: hidden; display: flex; align-items: center; gap: 0.9rem; min-height: 5rem; padding: 0.7rem 1rem;
+  border-radius: 0.8rem; background: #fff; box-shadow: rgba(149, 157, 165, 0.25) 0 8px 24px; }
+.av-toast__wave { position: absolute; transform: rotate(90deg); left: -31px; top: 32px; width: 80px; fill: #04e4003a; }
+.av-toast__icon { flex: none; width: 2.2rem; height: 2.2rem; display: grid; place-items: center; border-radius: 999px; background: #04e40048; margin-left: 0.5rem; color: #269b24; }
+.av-toast__title { color: #269b24; font-weight: 800; font-size: 1.05rem; }
+
+/* ---------- Alerta de compensación — adaptado de Uiverse.io por seyed-mohsen-mousavi (heavy-cobra-18), MIT ---------- */
+.av-alert { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; padding: 0.8rem 0.9rem; border-radius: 0.8rem; background: #232531; color: #fff; }
+.av-alert__icon { color: #d65563; background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(24px); padding: 0.3rem; border-radius: 0.6rem; }
+.av-alert__close { color: #9ca3af; padding: 0.25rem; border-radius: 0.4rem; }
+.av-alert__close:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* ---------- Hero: carretera ilustrada ---------- */
+.road-hero { position: relative; overflow: hidden; border-radius: 0 0 2.5rem 2.5rem; }
+.road-hero__truck { position: absolute; bottom: 17%; left: 50%; transform: translateX(-50%) scale(var(--truck-scale, 0.9)); transform-origin: bottom center; }
+.road-hero__truck--drive { animation: av-drive 1.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes av-drive { from { transform: translateX(-160%) scale(var(--truck-scale, 0.9)); } to { transform: translateX(-50%) scale(var(--truck-scale, 0.9)); } }
+
+/* ---------- Estados ---------- */
+.status-AVAILABLE { --pin: var(--color-pine); }
+.status-RESERVED { --pin: var(--color-amber); }
+.status-CHARGING { --pin: var(--color-volt); }
+.status-OUT_OF_SERVICE, .status-UNKNOWN { --pin: #8a94a3; }
+.chip { display: inline-flex; align-items: center; gap: 0.4rem; border-radius: var(--radius-chip); padding: 0.4rem 0.65rem; font-size: 0.85rem; font-weight: 700;
+  background: color-mix(in oklab, var(--pin) 14%, white); color: color-mix(in oklab, var(--pin) 80%, black); border: 1px solid color-mix(in oklab, var(--pin) 30%, white); }
+.chip::before { content: ''; width: 0.55rem; height: 0.55rem; border-radius: 999px; background: var(--pin); }
+
+/* interruptor de flags */
+.switch { position: relative; width: 3.2rem; height: 1.8rem; border-radius: 999px; background: #c7d3d0; transition: background 0.2s; flex: none; }
+.switch[aria-checked='true'] { background: var(--color-pine); }
+.switch::after { content: ''; position: absolute; top: 0.2rem; left: 0.2rem; width: 1.4rem; height: 1.4rem; border-radius: 999px; background: #fff; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.switch[aria-checked='true']::after { transform: translateX(1.4rem); }
+.switch:disabled { opacity: 0.45; cursor: not-allowed; }

@@ -1,0 +1,198 @@
+# CI pre-merge: corre en cada Pull Request hacia dev, test o prod.
+# Los nombres de los jobs (`name:`) son los checks OBLIGATORIOS de los rulesets: no cambiarlos sin
+# actualizar .github/rulesets/*.json.
+#
+# Seguridad de la cadena CI/CD:
+#  - Evento `pull_request` (NUNCA pull_request_target): el código del PR corre sin secretos de escritura.
+#  - Ningún ${{ github.event.* }} ni github.head_ref se interpola dentro de `run:`; se pasan por `env:`
+#    y se citan ("$VAR") para evitar inyección de comandos con nombres de rama o títulos maliciosos.
+#  - Acciones fijadas por SHA de commit y `permissions` mínimos por job.
+name: ci
+
+on:
+  pull_request:
+    branches: [dev, test, prod]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  promotion-guard:
+    name: promotion-guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validar la cadena feature/* → dev → test → prod
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          echo "PR: '$HEAD' → '$BASE'"
+          case "$BASE" in
+            dev)  [[ "$HEAD" =~ ^(feature|fix|chore|docs|refactor)/[A-Za-z0-9._/-]+$ ]] \
+                    || { echo "::error::A dev solo entran ramas feature/*, fix/*, chore/*, docs/* o refactor/*"; exit 1; } ;;
+            test) [[ "$HEAD" == "dev" ]]  || { echo "::error::A test solo se promueve desde dev"; exit 1; } ;;
+            prod) [[ "$HEAD" == "test" ]] || { echo "::error::A prod solo se promueve desde test"; exit 1; } ;;
+            *)    echo "::error::Rama destino no soportada"; exit 1 ;;
+          esac
+          echo "Promoción válida ✔"
+
+  lint-build:
+    name: lint & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with: { node-version: "22" }
+      - name: Lint Python (ruff) y SAST (bandit, incluye pickle/yaml.load/eval)
+        run: |
+          pip install ruff bandit
+          ruff check --select E,F,B,S,UP --ignore E501,S101,B008 libs services serverless observability scripts
+          bandit -q -r libs services serverless observability -x '*/tests/*,*/test_*.py' -ll
+      - name: Validar esquema GraphQL
+        working-directory: gateway/graphql-bff
+        run: npm ci && npm run lint:schema
+      - name: Build del frontend + npm audit (React2Shell y otras CVE)
+        working-directory: frontend
+        run: npm ci && npm run build && npm run audit:ci
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+      - name: Construir todas las imágenes Docker (sin publicar)
+        run: |
+          set -euo pipefail
+          jq -c '.[]' scripts/ci/images.json | while read -r img; do
+            name=$(jq -r .name <<<"$img"); ctx=$(jq -r .context <<<"$img")
+            file=$(jq -r .dockerfile <<<"$img"); args=$(jq -r .args <<<"$img")
+            build_args=(); [[ -n "$args" ]] && build_args=(--build-arg "$args")
+            echo "::group::$name"; docker buildx build --load -t "aegisvolt/$name:ci" -f "$file" "${build_args[@]}" "$ctx"; echo "::endgroup::"
+          done
+      - name: Helm lint del chart
+        uses: azure/setup-helm@fe7b79cd5ee1e45176fcad797de68ecaf3ca4814 # v4.2.0
+      - run: |
+          for env in dev test prod; do helm lint deploy/helm/aegisvolt -f "deploy/helm/aegisvolt/values-$env.yaml"; done
+          helm template aegisvolt deploy/helm/aegisvolt -f deploy/helm/aegisvolt/values-prod.yaml > /tmp/rendered.yaml
+
+  unit-tests:
+    name: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with: { node-version: "22" }
+      - uses: actions/setup-java@8df1039502a15bceb9433410b1a100fbe190c53b # v4.5.0
+        with: { distribution: temurin, java-version: "21", cache: maven }
+      - name: Librería común
+        run: pip install -e "libs/aegis-common[test]" && pytest -q libs/aegis-common/tests
+      - name: Lógica de negocio y máquina de estados de la SAGA
+        run: |
+          for svc in saga-orchestrator billing-wallet; do
+            (cd "services/$svc" && python -m pytest -q -p no:cacheprovider --rootdir . tests)
+          done
+      - name: Lambda flags-admin y reglas de auditoría de Prefect
+        run: |
+          (cd serverless/flags-admin && python -m pytest -q -p no:cacheprovider --rootdir . test_handler.py)
+          (cd observability/prefect && python -m pytest -q -p no:cacheprovider --rootdir . test_audit.py)
+      - name: BFF GraphQL (auth/scopes, ACL del legado)
+        working-directory: gateway/graphql-bff
+        run: npm ci && npm test
+      - name: ACL Kafka Streams (TopologyTestDriver)
+        working-directory: streams/acl-ocpp-translator
+        run: mvn -B -q test
+
+  integration-tests:
+    name: integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with: { python-version: "3.12" }
+      - name: SAGA completa contra tablas DynamoDB (moto) con fallos inducidos e idempotencia
+        run: pip install -e "libs/aegis-common[test]" && pytest -q tests/integration
+
+  e2e-tests:
+    name: e2e-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with: { python-version: "3.12" }
+      - name: Levantar el stack completo (Floci + Kafka + microservicios + BFF + frontend)
+        run: docker compose -f deploy/compose/docker-compose.yml up -d --build --wait --wait-timeout 300
+      - name: Flujo GraphQL de punta a punta (feliz + rollback por flag de fallo)
+        run: |
+          pip install pytest httpx boto3
+          pytest -q -m e2e tests/e2e -o addopts=""
+      - name: Logs del stack si falla
+        if: failure()
+        run: docker compose -f deploy/compose/docker-compose.yml logs --no-color --tail 200
+
+  iac-security:
+    name: iac-security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with: { terraform_version: "1.10.5" }
+      - name: terraform fmt / validate
+        run: |
+          terraform fmt -check -recursive infra/terraform
+          for dir in infra/terraform/bootstrap infra/terraform/envs; do
+            terraform -chdir="$dir" init -backend=false -input=false && terraform -chdir="$dir" validate
+          done
+      - name: tfsec
+        uses: aquasecurity/tfsec-action@b466648d6e39e7c75324f25d83891162a721f2d6 # v1.0.3
+        with: { working_directory: infra/terraform, soft_fail: false, additional_args: "--exclude-downloaded-modules" }
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@b4906742988cd6ad3ca39d53c5eecc681f2010c4 # v12.2919.0
+        with: { directory: infra/terraform, framework: terraform, quiet: true, download_external_modules: false }
+
+  terraform-plan:
+    name: terraform-plan
+    runs-on: ubuntu-latest
+    needs: [promotion-guard]
+    permissions:
+      contents: read
+      pull-requests: write   # publicar el resumen del plan en el PR
+    env:
+      TARGET_ENV: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with: { terraform_version: "1.10.5", terraform_wrapper: false }
+      - name: Levantar Floci (emulador de AWS; sin cuenta de AWS)
+        run: scripts/floci/terraform.sh up
+      - name: Bootstrap del estado remoto (S3 versionado + tabla de bloqueo)
+        run: scripts/floci/terraform.sh bootstrap
+      - name: terraform plan sobre el workspace de la rama DESTINO
+        run: scripts/floci/terraform.sh "$TARGET_ENV" plan
+      - name: Prueba de humo del IaC - apply en el Floci efímero del runner
+        run: scripts/floci/terraform.sh "$TARGET_ENV" apply
+      - name: Evidencia - versiones del tfstate del workspace
+        run: |
+          scripts/floci/terraform.sh "$TARGET_ENV" apply >/dev/null   # segundo apply → segunda versión del estado
+          scripts/floci/terraform.sh "$TARGET_ENV" versions
+      - name: Logs de Floci si falla
+        if: failure()
+        run: docker logs --tail 300 aegisvolt-floci
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with: { name: "tfplan-${{ github.base_ref }}", path: infra/terraform/envs/plan.txt, retention-days: 7, if-no-files-found: ignore }
+      - name: Publicar resumen del plan en el PR
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infra/terraform/envs/plan.txt', 'utf8');
+            const summary = (plan.match(/Plan: .*|No changes\..*/) || ['(sin resumen)'])[0];
+            await github.rest.issues.createComment({
+              ...context.repo, issue_number: context.issue.number,
+              body: `### terraform plan (Floci) · workspace \`${process.env.TARGET_ENV}\`\n**${summary}**\n<details><summary>Plan completo</summary>\n\n\`\`\`\n${plan.slice(-55000)}\n\`\`\`\n</details>`,
+            });

@@ -1,0 +1,9 @@
+# Namespace de la aplicación con Pod Security Admission "restricted" (bloquea pods privilegiados,
+# root, hostPath, capacidades extra). Lo aplica el pipeline antes del chart.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aegisvolt
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
