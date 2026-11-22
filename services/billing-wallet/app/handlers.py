@@ -4,6 +4,10 @@ Modelo Hold → Capture:
   AuthorizeHold : available -= monto, held += monto   (Paso 2, compensable)
   ReleaseHold   : available += monto, held -= monto   (compensación = "reembolso")
   CaptureHold   : held -= monto, captured += monto    (después del pivote, solo reintentable)
+                  + emite la FACTURA a la empresa del medio de pago (misma transacción → exactamente una).
+
+Medios de pago: cada operador registra empresas a las que se facturan sus cargas. Cada medio de pago
+es una cuenta de cobro (WALLET#pm-…) con un cupo de crédito; la SAGA retiene y captura contra ese cupo.
 
 Concurrencia: control optimista con `version` en la billetera (varias SAGAs de la misma flota).
 """
@@ -11,15 +15,29 @@ Concurrencia: control optimista con `version` en la billetera (varias SAGAs de l
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
+import uuid
 from datetime import UTC, datetime
 
 from aegis_common import topics
 from aegis_common.dynamo import BusinessConditionFailed, Txn, execute, get, now_iso, values
 from aegis_common.envelope import Envelope
 
-from .domain import AuthorizeHold, HoldStatus, SagaRef, hold_key, quote, wallet_key
+from .domain import (
+    AuthorizeHold,
+    HoldStatus,
+    RegisterPaymentMethod,
+    SagaRef,
+    hold_key,
+    invoice_key,
+    invoice_number,
+    payment_method_id,
+    quote,
+    split_iva,
+    wallet_key,
+)
 
 log = logging.getLogger("billing")
 SOURCE = "billing-wallet-service"
@@ -29,8 +47,11 @@ MAX_OCC_RETRIES = 5
 
 class BillingHandlers:
     def __init__(self, client, table: str, flags, *, tariff_cop_per_kwh: int | None = None,
-                 force_peak: bool | None = None, clock=lambda: datetime.now(UTC)) -> None:
+                 force_peak: bool | None = None, clock=lambda: datetime.now(UTC),
+                 environment: str | None = None, credit_limit_cop: int | None = None) -> None:
         self.client, self.table, self.flags, self.clock = client, table, flags, clock
+        self.environment = environment or os.getenv("AEGIS_ENV", "local")
+        self.credit_limit = credit_limit_cop or int(os.getenv("PAYMENT_METHOD_CREDIT_LIMIT_COP", "3000000"))
         self.tariff = tariff_cop_per_kwh or int(os.getenv("BASE_TARIFF_COP_PER_KWH", "1150"))
         self.force_peak = force_peak if force_peak is not None else os.getenv("SURGE_FORCE_PEAK", "false") == "true"
 
@@ -92,8 +113,11 @@ class BillingHandlers:
             reply = env.reply("billing.FundsHeld", {"hold_id": cmd.saga_id, "fleet_id": cmd.fleet_id, **q},
                               source=SOURCE)
             txn = self._wallet_txn(env, wallet, -amount, +amount, 0, require_funds=amount)
+            context = cmd.model_dump(include={"station_id", "connector_id", "vehicle_id", "requested_by",
+                                              "requested_by_email"}, exclude_none=True)
+            context["energy_kwh"] = cmd.estimated_kwh
             txn.put({**hold_key(cmd.saga_id), "status": HoldStatus.HELD.value, "fleet_id": cmd.fleet_id,
-                     "amount_cop": amount, "quote": q, "created_at": now_iso()},
+                     "amount_cop": amount, "quote": q, "context": context, "created_at": now_iso()},
                     condition="attribute_not_exists(pk)", label="hold")
             self._ledger(txn, cmd.fleet_id, cmd.saga_id, "HOLD", amount)
             txn.outbox(topics.SAGA_REPLIES, reply)
@@ -164,11 +188,71 @@ class BillingHandlers:
                        vals=values(cap=HoldStatus.CAPTURED.value, held=HoldStatus.HELD.value, now=now_iso()),
                        label="hold")
             self._ledger(txn, hold["fleet_id"], cmd.saga_id, "CAPTURE", amount)
+            invoice = self._invoice(cmd.saga_id, hold, wallet)
+            txn.put({**invoice_key(cmd.saga_id), **invoice}, condition="attribute_not_exists(pk)", label="invoice")
+            txn.outbox(topics.BILLING_EVENTS, env.reply("billing.InvoiceIssued", invoice, source=SOURCE),
+                       key=hold["fleet_id"])
             txn.outbox(topics.SAGA_REPLIES, env.reply("billing.FundsCaptured", {
-                "saga_id": cmd.saga_id, "captured_cop": amount}, source=SOURCE))
+                "saga_id": cmd.saga_id, "captured_cop": amount, "invoice_id": invoice["invoice_id"]}, source=SOURCE))
             try:
                 execute(self.client, txn, message_id=env.message_id, consumer=CONSUMER)
+                log.info("factura emitida", extra={"invoice": invoice["invoice_id"], "total_cop": amount})
                 return
             except BusinessConditionFailed:
                 continue
         raise RuntimeError("captura con conflicto persistente; se reintentará")
+
+    # ---------- Factura (se emite en la misma transacción que la captura) ----------
+    def _invoice(self, saga_id: str, hold: dict, wallet: dict) -> dict:
+        issued = self.clock()
+        total = hold["amount_cop"]
+        subtotal, iva = split_iva(total)
+        ctx, q = hold.get("context", {}), hold.get("quote", {})
+        invoice = {
+            "invoice_id": invoice_number(saga_id, issued), "saga_id": saga_id, "payment_method_id": hold["fleet_id"],
+            "company_name": wallet.get("company_name") or wallet.get("name") or hold["fleet_id"],
+            "account_last4": wallet.get("account_last4"), "owner": wallet.get("owner") or ctx.get("requested_by"),
+            "requested_by_email": ctx.get("requested_by_email"), "station_id": ctx.get("station_id"),
+            "connector_id": ctx.get("connector_id"), "vehicle_id": ctx.get("vehicle_id"),
+            "energy_kwh": ctx.get("energy_kwh", 0), "tariff_cop_per_kwh": q.get("tariff_cop_per_kwh"),
+            "multiplier": q.get("multiplier"), "surge_applied": q.get("surge_applied"),
+            "subtotal_cop": subtotal, "iva_cop": iva, "total_cop": total, "currency": "COP",
+            "issued_at": issued.isoformat(),
+        }
+        return {k: v for k, v in invoice.items() if v is not None}
+
+    # ---------- Medios de pago (comando síncrono desde el BFF) ----------
+    def register_payment_method(self, cmd: RegisterPaymentMethod) -> dict:
+        pm_id = payment_method_id(uuid.uuid4().hex)
+        now = now_iso()
+        method = {
+            "payment_method_id": pm_id, "owner": cmd.owner, "owner_email": cmd.owner_email,
+            "company_name": cmd.company_name, "account_last4": cmd.account_number[-4:],
+            "credit_limit_cop": self.credit_limit, "created_at": now,
+        }
+        wallet = {
+            **wallet_key(pm_id), "fleet_id": pm_id, "kind": "PAYMENT_METHOD", **method,
+            "name": cmd.company_name, "account_fingerprint": hashlib.sha256(cmd.account_number.encode()).hexdigest(),
+            "available_cop": self.credit_limit, "held_cop": 0, "captured_cop": 0, "version": 1, "updated_at": now,
+        }
+        registered = Envelope(type="billing.PaymentMethodRegistered", correlation_id=pm_id, source=SOURCE,
+                              environment=self.environment, payload={k: v for k, v in method.items() if v is not None})
+        balance = Envelope(type="billing.WalletBalanceChanged", correlation_id=pm_id, source=SOURCE,
+                           environment=self.environment,
+                           payload={"fleet_id": pm_id, "available_cop": self.credit_limit, "held_cop": 0,
+                                    "captured_cop": 0, "version": 1, "changed_at": now})
+        txn = (Txn(self.table)
+               .put(wallet, condition="attribute_not_exists(pk)", label="wallet")
+               .outbox(topics.BILLING_EVENTS, registered, key=pm_id)
+               .outbox(topics.BILLING_EVENTS, balance, key=pm_id))
+        execute(self.client, txn)
+        log.info("medio de pago registrado", extra={"payment_method": pm_id, "owner": cmd.owner})
+        return {**method, "available_cop": self.credit_limit, "held_cop": 0, "captured_cop": 0}
+
+    def payment_method(self, pm_id: str) -> dict | None:
+        wallet = get(self.client, self.table, **wallet_key(pm_id))
+        if not wallet or wallet.get("kind") != "PAYMENT_METHOD":
+            return None
+        keep = ("payment_method_id", "owner", "owner_email", "company_name", "account_last4", "credit_limit_cop",
+                "available_cop", "held_cop", "captured_cop", "created_at")
+        return {k: wallet[k] for k in keep if k in wallet}

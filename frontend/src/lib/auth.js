@@ -1,6 +1,7 @@
 /**
  * Autenticación OAuth2.
- *  - dev: el BFF emite un token firmado para el rol elegido (solo local/dev/test).
+ *  - dev: proveedor de identidad local del BFF: registro de operadores e ingreso con correo y contraseña
+ *    (solo local/dev/test). El rol lo define el dominio del correo (@operador, @admin, @auditor).
  *  - cognito: Authorization Code + PKCE contra el Hosted UI de Amazon Cognito (sin client secret en el navegador).
  * El token vive en sessionStorage (se borra al cerrar la pestaña) y nunca en la URL.
  */
@@ -44,13 +45,25 @@ export function onSessionChange(fn) {
   return () => listeners.delete(fn);
 }
 
-export async function loginDev(role) {
-  const res = await fetch(cfg().devTokenUrl, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role }),
+async function postAuth(path, payload) {
+  const res = await fetch(`${cfg().authUrl}${path}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('No se pudo emitir el token de desarrollo.');
-  const body = await res.json();
-  save({ token: body.access_token, role, scopes: body.scope.split(' '), expiresAt: Date.now() + body.expires_in * 1000 });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error ?? 'No se pudo conectar con el servicio de autenticación.');
+  return body;
+}
+
+export async function loginPassword(email, password) {
+  const body = await postAuth('/login', { email, password });
+  save({ token: body.access_token, role: body.user.role, email: body.user.email, name: body.user.name,
+    scopes: body.scope.split(' '), expiresAt: Date.now() + body.expires_in * 1000 });
+}
+
+/** Autorregistro: solo cuentas @operador. Las cuentas @admin y @auditor las crea un administrador. */
+export async function registerOperator({ name, email, password }) {
+  await postAuth('/register', { name, email, password });
+  await loginPassword(email, password);
 }
 
 const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -64,7 +77,8 @@ export async function loginCognito() {
   const params = new URLSearchParams({
     response_type: 'code', client_id: c.cognitoClientId, redirect_uri: c.redirectUri, state,
     code_challenge: challenge, code_challenge_method: 'S256',
-    scope: 'openid aegisvolt/stations.read aegisvolt/transactions.read aegisvolt/reservations.write aegisvolt/flags.admin',
+    scope: 'openid aegisvolt/stations.read aegisvolt/transactions.read aegisvolt/reservations.write aegisvolt/payments.manage '
+      + 'aegisvolt/audit.read aegisvolt/flags.admin aegisvolt/users.admin aegisvolt/platform.read',
   });
   window.location.assign(`${c.cognitoDomain}/oauth2/authorize?${params}`);
 }

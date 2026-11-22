@@ -28,6 +28,26 @@ class AuthorizeHold(BaseModel):
     fleet_id: str = Field(min_length=1, max_length=64)
     estimated_kwh: float = Field(gt=0, le=1000)
     tier: str = "FAST"
+    # Contexto para la factura (opcional: los comandos viejos no lo traen).
+    station_id: str | None = Field(default=None, max_length=64)
+    connector_id: str | None = Field(default=None, max_length=16)
+    vehicle_id: str | None = Field(default=None, max_length=32)
+    requested_by: str | None = Field(default=None, max_length=128)
+    requested_by_email: str | None = Field(default=None, max_length=254)
+
+
+class RegisterPaymentMethod(BaseModel):
+    """Medio de pago = cuenta de cobro de una empresa de flota, con un cupo de crédito.
+
+    El número de cuenta solo se usa para derivar los últimos 4 dígitos y una huella (SHA-256):
+    nunca se guarda completo.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    owner: str = Field(min_length=3, max_length=128, pattern=r"^[A-Za-z0-9_.:@-]+$")
+    owner_email: str | None = Field(default=None, max_length=254)
+    company_name: str = Field(min_length=2, max_length=80)
+    account_number: str = Field(pattern=r"^[0-9]{6,20}$")
 
 
 class SagaRef(BaseModel):
@@ -63,3 +83,24 @@ def wallet_key(fleet_id: str) -> dict[str, str]:
 
 def hold_key(saga_id: str) -> dict[str, str]:
     return {"pk": f"HOLD#{saga_id}", "sk": "HOLD"}
+
+
+IVA_RATE = Decimal("0.19")
+
+
+def payment_method_id(raw_uuid_hex: str) -> str:
+    return f"pm-{raw_uuid_hex[:16]}"
+
+
+def invoice_number(saga_id: str, issued_at: datetime) -> str:
+    return f"FAC-{issued_at.astimezone(BOGOTA):%Y%m%d}-{saga_id.replace('-', '')[:8].upper()}"
+
+
+def split_iva(total_cop: int) -> tuple[int, int]:
+    """El total ya incluye IVA del 19 %: devuelve (subtotal, iva) en pesos enteros."""
+    subtotal = int((Decimal(total_cop) / (1 + IVA_RATE)).to_integral_value(rounding=ROUND_CEILING))
+    return subtotal, total_cop - subtotal
+
+
+def invoice_key(saga_id: str) -> dict[str, str]:
+    return {"pk": f"INVOICE#{saga_id}", "sk": "INVOICE"}

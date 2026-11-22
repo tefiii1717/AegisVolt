@@ -6,7 +6,7 @@ locals {
 }
 
 data "aws_iam_policy_document" "irsa_trust" {
-  for_each = local.irsa_enabled ? merge(local.service_tables, { "graphql-bff" = [], "prefect-flows" = [], "acl-ocpp-translator" = [] }) : {}
+  for_each = local.irsa_enabled ? merge(local.service_tables, { "prefect-flows" = [], "acl-ocpp-translator" = [] }) : {}
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {

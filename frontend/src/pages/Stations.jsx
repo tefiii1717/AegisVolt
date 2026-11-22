@@ -3,6 +3,7 @@ import RoadHero from '../components/RoadHero.jsx';
 import StationMap from '../components/StationMap.jsx';
 import { BatteryLoader, CompensationAlert } from '../components/Notices.jsx';
 import { usePoll } from '../lib/api.js';
+import { getSession } from '../lib/auth.js';
 import { CONNECTOR_STATUS } from '../lib/format.js';
 import { STATIONS } from '../lib/queries.js';
 
@@ -23,7 +24,7 @@ function ConnectorRow({ station, c }) {
       </div>
       <div className="flex items-center gap-2">
         <span className="chip">{CONNECTOR_STATUS[c.status]}</span>
-        {c.status === 'AVAILABLE' && station.source === 'CORE' && (
+        {c.status === 'AVAILABLE' && station.source === 'CORE' && getSession()?.scopes.includes('aegisvolt/reservations.write') && (
           <a className="btn-charge !px-3 !py-2 text-sm" href={`#/reservar?station=${station.id}&connector=${c.id}`}>Reservar</a>
         )}
       </div>

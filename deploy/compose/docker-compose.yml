@@ -163,9 +163,21 @@ services:
       RESERVATION_URL: http://station-reservation:8000
       BILLING_URL: http://billing-wallet:8000
       DISPATCH_URL: http://energy-dispatch:8000
+      # Proveedor de identidad local: usuarios en DynamoDB (Floci) + administrador inicial.
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      DYNAMODB_ENDPOINT: http://floci:4566
+      IDENTITY_TABLE: aegisvolt-identity-local
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@admin.aegisvolt.co}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-AegisLocal2026}
     ports: ["4000:4000"]
-    networks: [edge, app]
-    depends_on: [query-projection, saga-orchestrator, flags-admin]
+    networks: [edge, app, data]
+    depends_on:
+      query-projection: { condition: service_started }
+      saga-orchestrator: { condition: service_started }
+      flags-admin: { condition: service_started }
+      bootstrap: { condition: service_completed_successfully }
 
   frontend:
     <<: *hardening
@@ -175,7 +187,7 @@ services:
       AEGIS_ENV: local
       GRAPHQL_URL: http://localhost:4000/graphql
       AUTH_MODE: dev
-      DEV_TOKEN_URL: http://localhost:4000/auth/dev-token
+      AUTH_URL: http://localhost:4000/auth
       REDIRECT_URI: http://localhost:5173/
     ports: ["5173:8080"]
     networks: [edge]

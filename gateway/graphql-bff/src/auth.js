@@ -3,23 +3,35 @@
  *  - cognito: valida access tokens de Amazon Cognito (firma RS256 vía JWKS, issuer, token_use, client_id).
  *    API Gateway ya validó el JWT en el borde; el BFF lo vuelve a validar (defensa en profundidad)
  *    y aplica autorización FINA por campo con scopes.
- *  - dev: emisor local de tokens (solo local/dev/test) para poder demostrar roles sin Cognito.
+ *  - dev: proveedor de identidad local (identity.js): correo + contraseña y token firmado por el BFF
+ *    (solo local/dev/test). La llave privada llega por un Secret, así que todas las réplicas firman y
+ *    verifican con la misma llave.
+ *
+ * Separación de responsabilidades: cada rol recibe SOLO los scopes de su trabajo.
+ *  - Operador de flota: reserva, administra sus medios de pago y ve SUS cargas y facturas.
+ *  - Administrador: feature flags, usuarios y salud de la plataforma; no ve cargas ni facturas.
+ *  - Auditor: lectura de TODAS las transacciones y facturas; no puede reservar ni cambiar nada.
  */
+import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { SignJWT, createRemoteJWKSet, exportJWK, generateKeyPair, jwtVerify } from 'jose';
 import { GraphQLError } from 'graphql';
 import { config } from './config.js';
 
 export const SCOPES = {
   STATIONS_READ: 'aegisvolt/stations.read',
-  TRANSACTIONS_READ: 'aegisvolt/transactions.read',
+  TRANSACTIONS_READ: 'aegisvolt/transactions.read', // solo las cargas propias
   RESERVATIONS_WRITE: 'aegisvolt/reservations.write',
+  PAYMENTS_MANAGE: 'aegisvolt/payments.manage',
+  AUDIT_READ: 'aegisvolt/audit.read', // todas las transacciones y facturas, solo lectura
   FLAGS_ADMIN: 'aegisvolt/flags.admin',
+  USERS_ADMIN: 'aegisvolt/users.admin',
+  PLATFORM_READ: 'aegisvolt/platform.read',
 };
 
 export const ROLES = {
-  'fleet-operator': [SCOPES.STATIONS_READ, SCOPES.TRANSACTIONS_READ, SCOPES.RESERVATIONS_WRITE],
-  'platform-admin': Object.values(SCOPES),
-  auditor: [SCOPES.STATIONS_READ, SCOPES.TRANSACTIONS_READ],
+  'fleet-operator': [SCOPES.STATIONS_READ, SCOPES.TRANSACTIONS_READ, SCOPES.RESERVATIONS_WRITE, SCOPES.PAYMENTS_MANAGE],
+  'platform-admin': [SCOPES.STATIONS_READ, SCOPES.FLAGS_ADMIN, SCOPES.USERS_ADMIN, SCOPES.PLATFORM_READ],
+  auditor: [SCOPES.STATIONS_READ, SCOPES.AUDIT_READ],
 };
 
 const DEV_ISSUER = 'https://auth.aegisvolt.local';
@@ -28,20 +40,26 @@ let devKeys;
 let remoteJwks;
 
 async function devKeyPair() {
+  if (!devKeys && config.jwtPrivateKeyPem) {
+    const privateKey = createPrivateKey(config.jwtPrivateKeyPem);
+    devKeys = { privateKey, publicKey: createPublicKey(privateKey) };
+  }
   devKeys ??= await generateKeyPair('RS256');
   return devKeys;
 }
 
-export async function issueDevToken(role) {
-  if (config.authMode !== 'dev') throw new Error('emisor dev deshabilitado');
-  const scopes = ROLES[role];
+/** Access token del proveedor local para un usuario autenticado (sub = id del usuario). */
+export async function issueUserToken(user) {
+  if (config.authMode !== 'dev') throw new Error('proveedor de identidad local deshabilitado');
+  const scopes = ROLES[user.role];
   if (!scopes) throw new Error('rol desconocido');
   const { privateKey } = await devKeyPair();
-  return new SignJWT({ scope: scopes.join(' '), role, token_use: 'access', client_id: 'aegisvolt-web-dev' })
+  return new SignJWT({ scope: scopes.join(' '), role: user.role, email: user.email, name: user.name,
+    token_use: 'access', client_id: 'aegisvolt-web-dev' })
     .setProtectedHeader({ alg: 'RS256', kid: 'dev-1' })
     .setIssuer(DEV_ISSUER)
     .setAudience(AUDIENCE)
-    .setSubject(`dev-${role}`)
+    .setSubject(user.user_id)
     .setIssuedAt()
     .setExpirationTime('1h')
     .sign(privateKey);
@@ -76,6 +94,8 @@ export async function authenticate(request) {
     const claims = await verifyToken(token);
     return {
       subject: String(claims.sub),
+      email: claims.email ?? null,
+      name: claims.name ?? null,
       role: claims.role ?? claims['cognito:groups']?.[0] ?? null,
       scopes: String(claims.scope ?? '').split(' ').filter(Boolean),
     };
@@ -95,6 +115,17 @@ export function requireScope(ctx, scope) {
   const user = requireUser(ctx);
   if (!user.scopes.includes(scope)) {
     throw new GraphQLError(`Falta el scope ${scope}`, { extensions: { code: 'FORBIDDEN', http: { status: 403 } } });
+  }
+  return user;
+}
+
+export const hasScope = (user, scope) => !!user?.scopes.includes(scope);
+
+/** Exige al menos uno de los scopes (p. ej. transacciones propias o auditoría). */
+export function requireAnyScope(ctx, scopes) {
+  const user = requireUser(ctx);
+  if (!scopes.some((s) => user.scopes.includes(s))) {
+    throw new GraphQLError(`Falta uno de los scopes ${scopes.join(', ')}`, { extensions: { code: 'FORBIDDEN', http: { status: 403 } } });
   }
   return user;
 }

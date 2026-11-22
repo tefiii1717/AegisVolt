@@ -36,9 +36,13 @@ resource "aws_cognito_resource_server" "api" {
   dynamic "scope" {
     for_each = {
       "stations.read"      = "Consultar estaciones y conectores"
-      "transactions.read"  = "Consultar transacciones SAGA"
+      "transactions.read"  = "Consultar las transacciones y facturas propias"
       "reservations.write" = "Iniciar reservas y cargas"
+      "payments.manage"    = "Registrar medios de pago de la empresa"
+      "audit.read"         = "Auditar todas las transacciones y facturas"
       "flags.admin"        = "Cambiar feature flags del ambiente"
+      "users.admin"        = "Crear cuentas de operador, administrador y auditor"
+      "platform.read"      = "Consultar la salud de la plataforma"
     }
     content {
       scope_name        = scope.key

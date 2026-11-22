@@ -11,13 +11,21 @@
 #   scripts/floci/deploy-k8s.sh dev logs     # logs en CloudWatch (Floci) enviados por Fluent Bit
 #   scripts/floci/deploy-k8s.sh dev prefect  # Prefect: salud + auditoría de SAGAs (UI en :4200)
 #   scripts/floci/deploy-k8s.sh dev status   # estado de pods y rollouts
+#   scripts/floci/deploy-k8s.sh dev admin    # correo y clave del administrador inicial
 set -euo pipefail
-ENV="${1:?uso: deploy-k8s.sh <dev|test|prod> <check|kafka|images|seed|helm|e2e|tunnels|ui|logs|prefect|status>}"
+ENV="${1:?uso: deploy-k8s.sh <dev|test|prod> <check|kafka|images|seed|helm|e2e|tunnels|ui|logs|prefect|status|admin>}"
 STEP="${2:?indica la etapa}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 CLUSTER="aegisvolt-$ENV"
 SERVICES=(station-reservation billing-wallet energy-dispatch saga-orchestrator query-projection legacy-csms flags-admin graphql-bff)
+
+admin_email() { kubectl get rollout graphql-bff -n aegisvolt -o jsonpath='{.spec.template.spec.containers[?(@.name=="app")].env[?(@.name=="BOOTSTRAP_ADMIN_EMAIL")].value}' 2>/dev/null || true; }
+admin_password() { kubectl get secret aegisvolt-identity -n aegisvolt -o jsonpath='{.data.bootstrap-admin-password}' 2>/dev/null | base64 -d 2>/dev/null || true; }
+admin_credentials() {
+  local pass; pass="$(admin_password)"
+  [ -n "$pass" ] && printf 'Administrador inicial: %s / %s\n' "$(admin_email)" "$pass" || true
+}
 kubectl config use-context "$CLUSTER" >/dev/null
 
 k3s_container() {
@@ -81,7 +89,8 @@ case "$STEP" in
       --set global.kafkaBootstrap=aegisvolt-kafka-bootstrap.kafka.svc:9092 \
       --set-string "global.corsOrigins=http://127.0.0.1:5173\,http://localhost:5173" \
       --set global.flagsApiUrl=http://flags-admin:8000 "${set_tags[@]}"
-    kubectl get rollouts -n aegisvolt ;;
+    kubectl get rollouts -n aegisvolt
+    admin_credentials ;;
   e2e)
     # SAGA de punta a punta contra el BFF del clúster (port-forward) y las tablas DynamoDB del ambiente.
     # El port-forward se ata a UN pod: si el BFF está en pleno canary, ese pod puede desaparecer.
@@ -93,6 +102,7 @@ case "$STEP" in
     curl -fs http://localhost:4000/health/live >/dev/null || { echo "el port-forward no responde:"; cat /tmp/aegis-pf.log; exit 1; }
     echo "BFF accesible en localhost:4000; ejecutando la SAGA de punta a punta..."
     docker run --rm --network host -v "$ROOT:/w:ro" -w /w -e E2E_ENV="$ENV" -e PYTHONDONTWRITEBYTECODE=1 \
+      -e E2E_ADMIN_EMAIL="$(admin_email)" -e E2E_ADMIN_PASSWORD="$(admin_password)" \
       python:3.12-slim sh -c "pip install -q pytest httpx boto3 2>/dev/null && pytest -q -p no:cacheprovider -m e2e tests/e2e -o addopts=''" ;;
   tunnels)
     # Port-forwards persistentes (sobreviven al script) hacia los servicios que usan la UI y Prefect.
@@ -122,9 +132,14 @@ case "$STEP" in
     docker rm -f aegisvolt-ui >/dev/null 2>&1 || true
     docker run -d --name aegisvolt-ui -p 5173:8080 \
       -e AEGIS_ENV="$ENV" -e GRAPHQL_URL=http://127.0.0.1:4000/graphql -e AUTH_MODE=dev \
-      -e DEV_TOKEN_URL=http://127.0.0.1:4000/auth/dev-token -e REDIRECT_URI=http://127.0.0.1:5173/ \
+      -e AUTH_URL=http://127.0.0.1:4000/auth \
+      -e REDIRECT_URI=http://127.0.0.1:5173/ \
       aegisvolt/frontend:local >/dev/null
-    echo "Consola web: http://127.0.0.1:5173 (ábrela en el navegador de Windows; usa 127.0.0.1, no localhost)" ;;
+    echo "Consola web: http://127.0.0.1:5173 (ábrela en el navegador de Windows; usa 127.0.0.1, no localhost)"
+    admin_credentials ;;
+  admin)
+    # Credenciales del administrador inicial (crea las cuentas @admin y @auditor desde la consola).
+    admin_credentials ;;
   logs)
     # Fluent Bit (sidecar) → CloudWatch Logs de Floci: grupos y streams por servicio.
     export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1

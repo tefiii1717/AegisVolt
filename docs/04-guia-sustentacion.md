@@ -59,9 +59,9 @@ hace `terraform workspace select -or-create "$TARGET_ENV"` y usa `-var-file=envi
 ## 6.3 SAGA y Feature Flags (25 %)
 
 **Demostración: flag de fallo en test + mutación + evidencia en DynamoDB.**
-1. Consola web (rol administrador) → Feature flags → activar *Simular falla física del cargador*
+1. Consola web, ingresando con la cuenta `@admin` → Feature flags → activar *Simular falla física del cargador*
    (o la mutación `setFeatureFlag(name: "SIMULATE_CHARGER_HARDWARE_FAULT", enabled: true)`).
-2. Reservar carga → la línea de tiempo muestra: reserva ✔, retención ✔, activación ✖, reembolso ↩, bahía liberada ↩.
+2. Ingresar con una cuenta `@operador` que tenga un medio de pago → Reservar carga → la línea de tiempo muestra: reserva ✔, retención ✔, activación ✖, reembolso ↩, bahía liberada ↩, y no se emite factura.
 3. DynamoDB:
 ```bash
 aws --endpoint-url http://localhost:4566 dynamodb get-item --table-name aegisvolt-billing-test --key '{"pk":{"S":"HOLD#<saga_id>"},"sk":{"S":"HOLD"}}'

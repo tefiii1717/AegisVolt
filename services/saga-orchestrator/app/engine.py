@@ -32,7 +32,10 @@ class StartSagaRequest(BaseModel):
     vehicle_id: str = Field(min_length=1, max_length=32)
     estimated_kwh: float = Field(gt=0, le=400)
     fast_charge: bool = False
-    requested_by: str | None = None
+    requested_by: str | None = Field(default=None, max_length=128)
+    requested_by_email: str | None = Field(default=None, max_length=254)
+    # Empresa a la que se factura (medio de pago del operador); fleet_id es la cuenta de cobro.
+    company_name: str | None = Field(default=None, max_length=80)
 
 
 def saga_key(saga_id: str) -> dict[str, str]:
@@ -55,7 +58,8 @@ class SagaEngine:
     def snapshot(saga: dict) -> dict[str, Any]:
         keys = ("saga_id", "state", "fleet_id", "vehicle_id", "station_id", "connector_id", "estimated_kwh",
                 "fast_charge", "power_kw", "tier", "amount_cop", "surge_applied", "multiplier", "failure_reason",
-                "steps", "compensations", "created_at", "updated_at", "version", "requested_by", "stuck")
+                "steps", "compensations", "created_at", "updated_at", "version", "requested_by", "stuck",
+                "requested_by_email", "company_name")
         return {k: saga.get(k) for k in keys if saga.get(k) is not None}
 
     # ---------- inicio ----------
