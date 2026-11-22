@@ -102,7 +102,7 @@ resource "aws_iam_role_policy" "service" {
 module "lbc_irsa" {
   #checkov:skip=CKV_TF_1:Módulo del registro fijado por versión semántica (~> 5.48).
   source                                 = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version                                = "~> 5.48"
+  version                                = "~> 6.11"
   count                                  = local.irsa_enabled ? 1 : 0
   role_name                              = "aegisvolt-${local.env}-aws-lb-controller"
   attach_load_balancer_controller_policy = true
