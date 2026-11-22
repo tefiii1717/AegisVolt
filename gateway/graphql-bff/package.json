@@ -20,6 +20,6 @@
     "graphql": "^16.9.0",
     "graphql-yoga": "^5.10.0",
     "jose": "^5.9.6",
-    "opossum": "^8.4.0"
+    "opossum": "^10.0.0"
   }
 }
