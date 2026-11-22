@@ -1,5 +1,5 @@
 export const SHELL = /* GraphQL */ `
-  query Shell { viewer { subject role scopes } environment { name version region authMode } }
+  query Shell { viewer { subject email name role scopes } environment { name version region authMode } }
 `;
 
 export const STATIONS = /* GraphQL */ `
@@ -15,13 +15,13 @@ export const STATIONS = /* GraphQL */ `
 export const RESERVE_CONTEXT = /* GraphQL */ `
   query ReserveContext {
     stations { id name city source connectors { id type powerKw tier status } }
-    fleets { id name availableCop heldCop }
+    paymentMethods { id companyName accountLast4 creditLimitCop availableCop heldCop }
     featureFlags { name enabled }
   }
 `;
 
 const TX_FIELDS = `
-  id state isTerminal outcome fleetId vehicleId stationId connectorId estimatedKwh powerKw amountCop surgeApplied
+  id state isTerminal outcome fleetId companyName requestedByEmail vehicleId stationId connectorId estimatedKwh powerKw amountCop surgeApplied
   failureReason stuck createdAt updatedAt
   steps { step status at detail }
   compensations { action status at refundedCop }
@@ -46,4 +46,29 @@ export const SET_FLAG = /* GraphQL */ `
 
 export const HEALTH = /* GraphQL */ `
   query Health { platformHealth { service status version circuitBreakers { name state failures rejected } } }
+`;
+
+export const PAYMENT_METHODS = /* GraphQL */ `
+  query PaymentMethods { paymentMethods { id companyName accountLast4 creditLimitCop availableCop heldCop capturedCop createdAt } }
+`;
+
+export const REGISTER_PAYMENT_METHOD = /* GraphQL */ `
+  mutation RegisterPaymentMethod($input: RegisterPaymentMethodInput!) {
+    registerPaymentMethod(input: $input) { id companyName accountLast4 availableCop }
+  }
+`;
+
+export const INVOICES = /* GraphQL */ `
+  query Invoices($limit: Int) {
+    invoices(limit: $limit) {
+      id sagaId companyName accountLast4 requestedByEmail stationId connectorId vehicleId energyKwh
+      tariffCopPerKwh multiplier surgeApplied subtotalCop ivaCop totalCop issuedAt
+    }
+  }
+`;
+
+export const USERS = /* GraphQL */ `query Users { users { id email name role active createdAt createdBy } }`;
+
+export const CREATE_USER = /* GraphQL */ `
+  mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id email name role } }
 `;

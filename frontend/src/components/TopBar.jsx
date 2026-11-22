@@ -8,14 +8,6 @@ const ENV_STYLE = {
   prod: 'bg-flag-red text-white',
 };
 
-const LINKS = [
-  ['#/estaciones', 'Estaciones'],
-  ['#/reservar', 'Reservar carga'],
-  ['#/transacciones', 'Transacciones'],
-  ['#/flags', 'Feature flags'],
-  ['#/plataforma', 'Plataforma'],
-];
-
 export function Logo() {
   return (
     <a href="#/estaciones" className="flex items-center gap-2" aria-label="AegisVolt, inicio">
@@ -29,13 +21,13 @@ export function Logo() {
   );
 }
 
-export default function TopBar({ env, viewer, route }) {
+export default function TopBar({ env, viewer, session, nav, route }) {
   return (
     <header className="bg-andes text-white">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3 sm:px-8">
         <Logo />
         <nav aria-label="Secciones" className="order-3 flex w-full gap-1 overflow-x-auto sm:order-none sm:w-auto">
-          {LINKS.map(([href, label]) => (
+          {nav.map(([href, label]) => (
             <a
               key={href}
               href={href}
@@ -52,7 +44,10 @@ export default function TopBar({ env, viewer, route }) {
               Ambiente {env.name}
             </span>
           )}
-          {viewer && <span className="hidden text-sm text-white/80 md:inline">{ROLE_LABEL[viewer.role] ?? viewer.subject}</span>}
+          <span className="hidden text-right text-sm leading-tight text-white/80 md:block">
+            <span className="block font-bold text-white">{viewer?.name ?? session?.name}</span>
+            {ROLE_LABEL[viewer?.role ?? session?.role] ?? viewer?.subject}
+          </span>
           <button type="button" className="rounded-xl px-3 py-2 text-sm font-bold text-white/80 hover:bg-white/10" onClick={clearSession}>
             Salir
           </button>

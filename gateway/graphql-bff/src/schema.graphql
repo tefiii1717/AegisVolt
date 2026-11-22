@@ -12,23 +12,33 @@ type Query {
   stations(city: String): [Station!]!
   "@scope: aegisvolt/stations.read"
   station(id: ID!): Station
-  "@scope: aegisvolt/transactions.read"
+  "@scope: aegisvolt/audit.read — cuentas de cobro de todas las empresas"
   fleets: [Fleet!]!
-  "@scope: aegisvolt/transactions.read"
+  "@scope: aegisvolt/transactions.read (solo las propias) | aegisvolt/audit.read (todas)"
   transactions(limit: Int = 20): [SagaTransaction!]!
-  "@scope: aegisvolt/transactions.read — read-your-writes: si aún no está proyectada se consulta el log de SAGA"
+  "@scope: aegisvolt/transactions.read (solo si es propia) | aegisvolt/audit.read — read-your-writes contra el log de SAGA"
   transaction(id: ID!): SagaTransaction
+  "@scope: aegisvolt/payments.manage — medios de pago del operador autenticado"
+  paymentMethods: [PaymentMethod!]!
+  "@scope: aegisvolt/transactions.read (solo las propias) | aegisvolt/audit.read (todas)"
+  invoices(limit: Int = 50): [Invoice!]!
+  "@scope: aegisvolt/users.admin"
+  users: [User!]!
   "@scope: ninguno — estado de flags del ambiente actual"
   featureFlags: [FeatureFlag!]!
-  "@scope: aegisvolt/transactions.read"
+  "@scope: aegisvolt/platform.read"
   platformHealth: [ServiceHealth!]!
 }
 
 type Mutation {
   "@scope: aegisvolt/reservations.write — dispara la SAGA Reservar y Activar Carga (asíncrona, 202)"
   reserveAndCharge(input: ReserveAndChargeInput!): ReserveAndChargePayload!
+  "@scope: aegisvolt/payments.manage — registra la empresa a la que se facturan las cargas"
+  registerPaymentMethod(input: RegisterPaymentMethodInput!): PaymentMethod!
   "@scope: aegisvolt/flags.admin — cambia una flag SIN redesplegar (Lambda flags-admin)"
   setFeatureFlag(name: String!, enabled: Boolean!): FeatureFlag!
+  "@scope: aegisvolt/users.admin — crea cuentas @operador, @admin o @auditor"
+  createUser(input: CreateUserInput!): User!
 }
 
 type Subscription {
@@ -91,7 +101,10 @@ type SagaTransaction {
   state: SagaState!
   isTerminal: Boolean!
   outcome: String!
+  "Cuenta de cobro: el medio de pago de la empresa"
   fleetId: String!
+  companyName: String
+  requestedByEmail: String
   vehicleId: String
   stationId: String!
   connectorId: String!
@@ -141,6 +154,8 @@ type EnvironmentInfo {
 
 type Viewer {
   subject: String!
+  email: String
+  name: String
   role: String
   scopes: [String!]!
 }
@@ -160,7 +175,8 @@ type ServiceHealth {
 }
 
 input ReserveAndChargeInput {
-  fleetId: String!
+  "Medio de pago propio: la factura se emite a esa empresa"
+  paymentMethodId: String!
   stationId: String!
   connectorId: String!
   vehicleId: String!
@@ -173,4 +189,57 @@ input ReserveAndChargeInput {
 type ReserveAndChargePayload {
   accepted: Boolean!
   transaction: SagaTransaction!
+}
+
+type PaymentMethod {
+  id: ID!
+  companyName: String!
+  "Solo los últimos 4 dígitos: el número completo nunca se guarda ni se devuelve"
+  accountLast4: String!
+  creditLimitCop: Int!
+  availableCop: Int!
+  heldCop: Int!
+  capturedCop: Int!
+  createdAt: String
+}
+
+type Invoice {
+  id: ID!
+  sagaId: String!
+  paymentMethodId: String!
+  companyName: String!
+  accountLast4: String
+  requestedByEmail: String
+  stationId: String
+  connectorId: String
+  vehicleId: String
+  energyKwh: Float!
+  tariffCopPerKwh: Int
+  multiplier: Float
+  surgeApplied: Boolean
+  subtotalCop: Int!
+  ivaCop: Int!
+  totalCop: Int!
+  issuedAt: String!
+}
+
+type User {
+  id: ID!
+  email: String!
+  name: String!
+  role: String!
+  active: Boolean!
+  createdAt: String
+  createdBy: String
+}
+
+input RegisterPaymentMethodInput {
+  companyName: String!
+  accountNumber: String!
+}
+
+input CreateUserInput {
+  email: String!
+  name: String!
+  password: String!
 }

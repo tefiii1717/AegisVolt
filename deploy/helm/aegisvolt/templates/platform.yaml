@@ -1,4 +1,25 @@
 {{- $g := .Values.global -}}
+{{- if eq $g.authMode "dev" }}
+{{- $prev := lookup "v1" "Secret" .Release.Namespace "aegisvolt-identity" }}
+# ---------- Proveedor de identidad local (solo authMode=dev) ----------
+# Llave RSA con la que TODAS las réplicas del BFF firman y verifican los tokens, y la clave del
+# administrador inicial. Se generan una vez y se conservan en cada upgrade (lookup + resource-policy).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aegisvolt-identity
+  annotations: { "helm.sh/resource-policy": keep }
+type: Opaque
+data:
+  {{- if $prev }}
+  jwt-private-key: {{ index $prev.data "jwt-private-key" }}
+  bootstrap-admin-password: {{ index $prev.data "bootstrap-admin-password" }}
+  {{- else }}
+  jwt-private-key: {{ genPrivateKey "rsa" | b64enc }}
+  bootstrap-admin-password: {{ printf "Av%s9" (randAlphaNum 14) | b64enc }}
+  {{- end }}
+---
+{{- end }}
 # ---------- Ingress del BFF (stableIngress del canary con pesos exactos) ----------
 apiVersion: networking.k8s.io/v1
 kind: Ingress

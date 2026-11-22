@@ -32,13 +32,14 @@ export const STEP_LABEL = {
   AUTHORIZE_FUNDS: 'Retención de saldo',
   START_CHARGING: 'Activación del cargador',
   CAPTURE_FUNDS: 'Cobro confirmado',
-  REFUND_FUNDS: 'Reembolso a la billetera',
+  REFUND_FUNDS: 'Cupo liberado (reembolso)',
   RELEASE_CONNECTOR: 'Bahía liberada',
 };
 
 export const FAILURE_REASON = {
   HARDWARE_FAULT_SIMULATED: 'El cargador reportó una falla física (falla simulada activa en este ambiente).',
-  INSUFFICIENT_FUNDS: 'La billetera de la flota no tiene saldo suficiente para la retención estimada.',
+  INSUFFICIENT_FUNDS: 'El medio de pago no tiene cupo suficiente para la retención estimada.',
+  WALLET_NOT_FOUND: 'El medio de pago no existe o fue retirado.',
   CONNECTOR_NOT_AVAILABLE: 'Otra flota tomó esta bahía. Elige otro conector.',
   FAST_CHARGE_DISABLED: 'La ultra-carga no está habilitada en este ambiente.',
   CHARGER_ERROR: 'El cargador no respondió a la orden de inicio.',
@@ -51,4 +52,16 @@ export const ROLE_LABEL = {
   'fleet-operator': 'Operador de flota',
   'platform-admin': 'Administrador de plataforma',
   auditor: 'Auditor',
+};
+
+/** Secciones de la consola por rol: cada rol ve solo su trabajo. */
+export const NAV_BY_ROLE = {
+  'fleet-operator': [
+    ['#/estaciones', 'Estaciones'], ['#/reservar', 'Reservar carga'], ['#/transacciones', 'Mis cargas'],
+    ['#/pagos', 'Medios de pago'], ['#/facturas', 'Facturas'],
+  ],
+  'platform-admin': [
+    ['#/estaciones', 'Estaciones'], ['#/plataforma', 'Plataforma'], ['#/flags', 'Feature flags'], ['#/usuarios', 'Usuarios'],
+  ],
+  auditor: [['#/estaciones', 'Estaciones'], ['#/transacciones', 'Transacciones'], ['#/facturas', 'Facturas']],
 };

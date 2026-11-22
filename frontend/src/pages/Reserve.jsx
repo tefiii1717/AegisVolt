@@ -6,11 +6,6 @@ import { gql, usePoll } from '../lib/api.js';
 import { FAILURE_REASON, SAGA_STATE, formatCop } from '../lib/format.js';
 import { RESERVE, RESERVE_CONTEXT, TRANSACTION } from '../lib/queries.js';
 
-const VEHICLES = {
-  'flota-andina': ['VAN-ANDI-01', 'VAN-ANDI-02'],
-  'flota-sabana-verde': ['VAN-SAB-01'],
-  'flota-cafe-express': ['MOTO-CAFE-01'],
-};
 const REFERENCE_TARIFF = 1150; // COP/kWh, solo referencia visual; el monto real lo calcula billing-wallet
 
 function useHashParams() {
@@ -27,12 +22,12 @@ function LiveSaga({ id, onDone }) {
       {!tx.isTerminal && <BatteryLoader label={SAGA_STATE[tx.state]} />}
       {tx.outcome === 'SUCCESS' && (
         <SuccessToast title="Carga activada">
-          Bahía {tx.connectorId} de {tx.stationId} entregando energía. Cobro confirmado por {formatCop(tx.amountCop)}.
+          Bahía {tx.connectorId} de {tx.stationId} entregando energía. Se emitió la factura a {tx.companyName ?? 'tu empresa'} por {formatCop(tx.amountCop)}.
         </SuccessToast>
       )}
       {tx.outcome === 'ROLLED_BACK' && (
         <CompensationAlert title="La carga no se pudo activar y se revirtió">
-          {FAILURE_REASON[tx.failureReason] ?? tx.failureReason} El saldo retenido volvió a la billetera y la bahía quedó libre.
+          {FAILURE_REASON[tx.failureReason] ?? tx.failureReason} El cupo retenido se liberó, la bahía quedó libre y no se emitió factura.
         </CompensationAlert>
       )}
       {tx.outcome === 'FAILED' && (
@@ -50,8 +45,8 @@ export default function Reserve() {
   const [form, setForm] = useState({
     stationId: params.get('station') ?? 'EST-BOG-080',
     connectorId: params.get('connector') ?? 'C1',
-    fleetId: 'flota-andina',
-    vehicleId: 'VAN-ANDI-01',
+    paymentMethodId: '',
+    vehicleId: '',
     estimatedKwh: 40,
   });
   const [sagaId, setSagaId] = useState(null);
@@ -61,7 +56,8 @@ export default function Reserve() {
 
   const station = data?.stations.find((s) => s.id === form.stationId);
   const connector = station?.connectors.find((c) => c.id === form.connectorId);
-  const fleet = data?.fleets.find((f) => f.id === form.fleetId);
+  const methods = data?.paymentMethods ?? [];
+  const pm = methods.find((m) => m.id === form.paymentMethodId) ?? methods[0];
   const flags = Object.fromEntries((data?.featureFlags ?? []).map((f) => [f.name, f.enabled]));
   const ultraBlocked = connector?.tier === 'ULTRA' && !flags.ENABLE_FAST_CHARGE_BOOST;
   const reference = Math.ceil(form.estimatedKwh * REFERENCE_TARIFF * (connector?.tier === 'ULTRA' ? 1.15 : 1));
@@ -74,7 +70,7 @@ export default function Reserve() {
     setFinished(null);
     try {
       const { reserveAndCharge } = await gql(RESERVE, {
-        input: { ...form, estimatedKwh: Number(form.estimatedKwh), fastCharge: connector?.tier === 'ULTRA',
+        input: { ...form, paymentMethodId: pm?.id, estimatedKwh: Number(form.estimatedKwh), fastCharge: connector?.tier === 'ULTRA',
           idempotencyKey: crypto.randomUUID() },
       });
       setSagaId(reserveAndCharge.transaction.id);
@@ -90,7 +86,8 @@ export default function Reserve() {
       <section>
         <h1 className="text-6xl">Reservar y cargar</h1>
         <p className="mt-2 max-w-md text-slate-600">
-          Se reserva la bahía, se retiene el saldo estimado y se ordena al cargador iniciar. Si algo falla, todo se revierte solo.
+          Se reserva la bahía, se retiene el monto estimado en el cupo de la empresa y se ordena al cargador iniciar.
+          Si la carga se activa, la empresa recibe la factura; si algo falla, todo se revierte solo.
         </p>
         <div className="mt-8 flex h-24 items-end">
           <Truck parked={!sagaId || !!finished} width={200} />
@@ -129,17 +126,19 @@ export default function Reserve() {
             <hr />
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="av-checkout__section-label" htmlFor="fleet">Flota</label>
-                <select id="fleet" className="av-field" value={form.fleetId}
-                  onChange={(e) => set({ fleetId: e.target.value, vehicleId: VEHICLES[e.target.value]?.[0] })}>
-                  {data?.fleets.map((f) => <option key={f.id} value={f.id}>{f.name ?? f.id}</option>)}
-                </select>
+                <label className="av-checkout__section-label" htmlFor="payment">Facturar a</label>
+                {data && methods.length === 0 ? (
+                  <a href="#/pagos" className="av-field flex items-center font-bold text-charge-deep underline">Registrar medio de pago</a>
+                ) : (
+                  <select id="payment" className="av-field" value={pm?.id ?? ''} onChange={(e) => set({ paymentMethodId: e.target.value })}>
+                    {methods.map((m) => <option key={m.id} value={m.id}>{m.companyName} •••• {m.accountLast4}</option>)}
+                  </select>
+                )}
               </div>
               <div>
-                <label className="av-checkout__section-label" htmlFor="vehicle">Vehículo</label>
-                <select id="vehicle" className="av-field" value={form.vehicleId} onChange={(e) => set({ vehicleId: e.target.value })}>
-                  {(VEHICLES[form.fleetId] ?? []).map((v) => <option key={v}>{v}</option>)}
-                </select>
+                <label className="av-checkout__section-label" htmlFor="vehicle">Placa del vehículo</label>
+                <input id="vehicle" className="av-field uppercase" required minLength={3} maxLength={32} pattern="[A-Za-z0-9\-]{3,32}"
+                  placeholder="WKT512" value={form.vehicleId} onChange={(e) => set({ vehicleId: e.target.value.toUpperCase() })} />
               </div>
             </div>
             <div>
@@ -149,10 +148,10 @@ export default function Reserve() {
             </div>
             <hr />
             <div>
-              <span className="av-checkout__section-label">Saldo</span>
+              <span className="av-checkout__section-label">Cupo del medio de pago</span>
               <dl className="av-checkout__details">
-                <dt>Disponible en la billetera</dt><dd>{formatCop(fleet?.availableCop)}</dd>
-                <dt>Retenido por otras cargas</dt><dd>{formatCop(fleet?.heldCop)}</dd>
+                <dt>Disponible</dt><dd>{formatCop(pm?.availableCop)}</dd>
+                <dt>Retenido por otras cargas</dt><dd>{formatCop(pm?.heldCop)}</dd>
                 <dt>Tarifa de referencia</dt><dd>{formatCop(REFERENCE_TARIFF)} / kWh</dd>
                 {flags.ENABLE_DYNAMIC_SURGE_PRICING && <><dt>Tarifa dinámica</dt><dd>activa de 5 a 9 p. m.</dd></>}
               </dl>
@@ -165,7 +164,8 @@ export default function Reserve() {
             <p className="text-sm text-slate-600">Retención estimada</p>
             <p className="av-checkout__price">{formatCop(reference)}</p>
           </div>
-          <button type="submit" className="btn-charge" disabled={submitting || !connector || connector.status !== 'AVAILABLE' || ultraBlocked}>
+          <button type="submit" className="btn-charge"
+            disabled={submitting || !pm || !connector || connector.status !== 'AVAILABLE' || ultraBlocked}>
             {submitting ? 'Enviando…' : 'Reservar y cargar'}
           </button>
         </div>

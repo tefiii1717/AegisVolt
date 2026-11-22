@@ -4,20 +4,25 @@ process.env.AUTH_MODE = 'dev';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { issueDevToken, verifyToken, requireScope, SCOPES } = await import('../src/auth.js');
+const { issueUserToken, verifyToken, requireScope, SCOPES, ROLES } = await import('../src/auth.js');
+const { roleForEmail, hashPassword, verifyPassword, validatePassword } = await import('../src/identity.js');
+
+const fakeUser = (role) => ({ user_id: `u-${role}`, email: `x@${role}`, name: 'Prueba', role });
+const tokenFor = (role) => issueUserToken(fakeUser(role));
 const { translateLegacyStation, projectToMap } = await import('../src/legacyAcl.js');
-const { toTransaction } = await import('../src/resolvers.js');
+const { toTransaction, canSee } = await import('../src/resolvers.js');
 const { yoga, allowedOrigin } = await import('../src/index.js');
 
 test('el token de operador no tiene flags.admin', async () => {
-  const claims = await verifyToken(await issueDevToken('fleet-operator'));
+  const claims = await verifyToken(await tokenFor('fleet-operator'));
+  assert.equal(claims.sub, 'u-fleet-operator');
   const ctx = { user: { subject: claims.sub, scopes: claims.scope.split(' ') } };
   assert.doesNotThrow(() => requireScope(ctx, SCOPES.RESERVATIONS_WRITE));
   assert.throws(() => requireScope(ctx, SCOPES.FLAGS_ADMIN), /Falta el scope/);
 });
 
 test('un token alterado se rechaza', async () => {
-  const token = await issueDevToken('auditor');
+  const token = await tokenFor('auditor');
   const [h, p, s] = token.split('.');
   const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(p, 'base64url')), scope: SCOPES.FLAGS_ADMIN }))
     .toString('base64url');
@@ -67,4 +72,44 @@ test('CORS: refleja solo orígenes de la lista y permite cualquiera sin lista', 
   assert.equal(allowedOrigin('http://evil.example', list), null);
   assert.equal(allowedOrigin(undefined, list), null);
   assert.equal(allowedOrigin('http://x', []), '*');
+});
+
+test('los roles no comparten responsabilidades', () => {
+  const op = ROLES['fleet-operator'];
+  const admin = ROLES['platform-admin'];
+  const auditor = ROLES.auditor;
+  assert.ok(op.includes(SCOPES.RESERVATIONS_WRITE) && op.includes(SCOPES.PAYMENTS_MANAGE));
+  assert.ok(!op.includes(SCOPES.AUDIT_READ) && !op.includes(SCOPES.FLAGS_ADMIN) && !op.includes(SCOPES.USERS_ADMIN));
+  assert.ok(admin.includes(SCOPES.FLAGS_ADMIN) && admin.includes(SCOPES.USERS_ADMIN));
+  assert.ok(!admin.includes(SCOPES.RESERVATIONS_WRITE) && !admin.includes(SCOPES.TRANSACTIONS_READ) && !admin.includes(SCOPES.AUDIT_READ));
+  assert.deepEqual(auditor, [SCOPES.STATIONS_READ, SCOPES.AUDIT_READ]);
+});
+
+test('el rol sale del dominio del correo', () => {
+  assert.equal(roleForEmail('sofia@operador.aegisvolt.co'), 'fleet-operator');
+  assert.equal(roleForEmail('Ana@Admin'), 'platform-admin');
+  assert.equal(roleForEmail('luis@auditor.aegisvolt.co'), 'auditor');
+  assert.equal(roleForEmail('x@gmail.com'), null);
+  assert.equal(roleForEmail('x@operadorfalso.co'), null);
+  assert.equal(roleForEmail('sin-arroba'), null);
+});
+
+test('contraseñas con scrypt: verificación correcta y política mínima', async () => {
+  const stored = await hashPassword('Carga2026');
+  assert.ok(stored.startsWith('scrypt$') && !stored.includes('Carga2026'));
+  assert.equal(await verifyPassword('Carga2026', stored), true);
+  assert.equal(await verifyPassword('carga2026', stored), false);
+  assert.equal(await verifyPassword('Carga2026', 'texto-plano'), false);
+  assert.ok(validatePassword('corta1'));
+  assert.ok(validatePassword('sololetras'));
+  assert.equal(validatePassword('Carga2026'), null);
+});
+
+test('un operador solo ve lo suyo; el auditor ve todo', () => {
+  const op = { subject: 'u-1', scopes: ROLES['fleet-operator'] };
+  const auditor = { subject: 'u-2', scopes: ROLES.auditor };
+  assert.equal(canSee(op, 'u-1'), true);
+  assert.equal(canSee(op, 'u-9'), false);
+  assert.equal(canSee(op, null), false);
+  assert.equal(canSee(auditor, 'u-9'), true);
 });

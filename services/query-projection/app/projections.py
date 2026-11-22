@@ -17,6 +17,12 @@ log = logging.getLogger("projection")
 
 STATIONS_PK = "STATIONS"
 FLEETS_PK = "FLEETS"
+INVOICES_PK = "INVOICES"
+
+
+def owner_pk(owner: str) -> str:
+    """Partición por usuario: un operador solo consulta su partición (cargas, medios de pago, facturas)."""
+    return f"OWNER#{owner}"
 
 
 class Projector:
@@ -30,6 +36,8 @@ class Projector:
             "telemetry.MeterValuesRecorded": self.telemetry,
             "saga.SagaStateChanged": self.saga_changed,
             "billing.WalletBalanceChanged": self.wallet_changed,
+            "billing.PaymentMethodRegistered": self.payment_method_registered,
+            "billing.InvoiceIssued": self.invoice_issued,
             "dispatch.SessionEnded": self.session_ended,
         }.get(env.type)
         if fn:
@@ -80,6 +88,26 @@ class Projector:
         self.client.put_item(TableName=self.table, Item=to_ddb(item),
                              ConditionExpression="attribute_not_exists(pk) OR version < :v",
                              ExpressionAttributeValues=values(v=snap.get("version", 0)))
+        if snap.get("requested_by"):
+            mine = {"pk": owner_pk(snap["requested_by"]), "sk": f"SAGA#{snap['saga_id']}", **snap}
+            self.client.put_item(TableName=self.table, Item=to_ddb(mine),
+                                 ConditionExpression="attribute_not_exists(pk) OR version < :v",
+                                 ExpressionAttributeValues=values(v=snap.get("version", 0)))
+
+    def payment_method_registered(self, env: Envelope) -> None:
+        p = env.payload
+        self.client.put_item(TableName=self.table, Item=to_ddb({
+            "pk": owner_pk(p["owner"]), "sk": f"PM#{p['payment_method_id']}", **p}),
+            ConditionExpression="attribute_not_exists(pk)")
+
+    def invoice_issued(self, env: Envelope) -> None:
+        inv = env.payload
+        sk = f"INV#{inv['issued_at']}#{inv['saga_id']}"
+        self.client.put_item(TableName=self.table, Item=to_ddb({"pk": INVOICES_PK, "sk": sk, **inv}),
+                             ConditionExpression="attribute_not_exists(pk)")
+        if inv.get("owner"):
+            self.client.put_item(TableName=self.table, Item=to_ddb({"pk": owner_pk(inv["owner"]), "sk": sk, **inv}),
+                                 ConditionExpression="attribute_not_exists(pk)")
 
     def wallet_changed(self, env: Envelope) -> None:
         p = env.payload
@@ -111,6 +139,25 @@ class Projector:
         resp = self.client.get_item(TableName=self.table, Key=to_ddb({"pk": f"SAGA#{saga_id}", "sk": "SUMMARY"}))
         item = from_ddb(resp.get("Item"))
         return self._clean(item) if item else None
+
+    def owner_sagas(self, owner: str, limit: int = 20) -> list[dict]:
+        docs = [self._clean(d) for d in query_pk(self.client, self.table, owner_pk(owner), sk_prefix="SAGA#")]
+        return sorted(docs, key=lambda d: d.get("created_at", ""), reverse=True)[:limit]
+
+    def payment_methods(self, owner: str) -> list[dict]:
+        methods = [self._clean(d) for d in query_pk(self.client, self.table, owner_pk(owner), sk_prefix="PM#")]
+        for m in methods:  # saldo vivo del cupo: lo mantiene wallet_changed en FLEETS
+            resp = self.client.get_item(TableName=self.table,
+                                        Key=to_ddb({"pk": FLEETS_PK, "sk": f"FLEET#{m['payment_method_id']}"}))
+            balance = from_ddb(resp.get("Item")) or {}
+            m.update({k: balance[k] for k in ("available_cop", "held_cop", "captured_cop") if k in balance})
+            m.setdefault("available_cop", m.get("credit_limit_cop", 0))
+        return sorted(methods, key=lambda m: m.get("created_at", ""))
+
+    def invoices(self, owner: str | None = None, limit: int = 50) -> list[dict]:
+        pk = owner_pk(owner) if owner else INVOICES_PK
+        docs = [self._clean(d) for d in query_pk(self.client, self.table, pk, sk_prefix="INV#")]
+        return sorted(docs, key=lambda d: d.get("issued_at", ""), reverse=True)[:limit]
 
     def fleets(self) -> list[dict]:
         return [self._clean(f) for f in query_pk(self.client, self.table, FLEETS_PK, sk_prefix="FLEET#")]

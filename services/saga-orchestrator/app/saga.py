@@ -64,9 +64,11 @@ def release_connector_cmd(saga: dict, reason: str) -> Command:
 
 
 def authorize_cmd(saga: dict) -> Command:
+    context = {k: saga[k] for k in ("station_id", "connector_id", "vehicle_id", "requested_by",
+                                     "requested_by_email") if saga.get(k)}
     return Command(topics.BILLING_COMMANDS, "billing.AuthorizeHold", {
         "saga_id": saga["saga_id"], "fleet_id": saga["fleet_id"], "estimated_kwh": saga["estimated_kwh"],
-        "tier": saga.get("tier", "FAST")})
+        "tier": saga.get("tier", "FAST"), **context})
 
 
 def release_hold_cmd(saga: dict, reason: str) -> Command:

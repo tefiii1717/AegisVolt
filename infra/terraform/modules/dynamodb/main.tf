@@ -1,9 +1,10 @@
 # Database-per-Service: una tabla por bounded context Y por ambiente.
 #   aegisvolt-reservations-dev, aegisvolt-billing-test, aegisvolt-dispatch-prod, ...
 # Como el nombre incluye terraform.workspace, un apply en `test` jamás puede tocar una tabla de `prod`.
+# `identity` guarda los usuarios del proveedor de identidad local del BFF (en AWS real lo reemplaza Cognito).
 
 locals {
-  service_tables = toset(["reservations", "billing", "dispatch", "sagas", "readmodel"])
+  service_tables = toset(["reservations", "billing", "dispatch", "sagas", "readmodel", "identity"])
 }
 
 resource "aws_dynamodb_table" "service" {
