@@ -39,6 +39,27 @@ async def saga(saga_id: str) -> dict:
     return doc
 
 
+@router.get("/owners/{owner}/sagas")
+async def owner_sagas(owner: str, limit: int = 20) -> list[dict]:
+    return await asyncio.to_thread(projector.owner_sagas, owner, min(max(limit, 1), 100))
+
+
+@router.get("/owners/{owner}/payment-methods")
+async def owner_payment_methods(owner: str) -> list[dict]:
+    return await asyncio.to_thread(projector.payment_methods, owner)
+
+
+@router.get("/owners/{owner}/invoices")
+async def owner_invoices(owner: str, limit: int = 50) -> list[dict]:
+    return await asyncio.to_thread(projector.invoices, owner, min(max(limit, 1), 200))
+
+
+@router.get("/invoices")
+async def all_invoices(limit: int = 50) -> list[dict]:
+    """Solo la consume el BFF para el rol auditor (scope aegisvolt/audit.read)."""
+    return await asyncio.to_thread(projector.invoices, None, min(max(limit, 1), 200))
+
+
 @router.get("/fleets")
 async def fleets() -> list[dict]:
     return await asyncio.to_thread(projector.fleets)

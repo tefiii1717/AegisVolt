@@ -186,6 +186,14 @@ spec:
             - { name: RESERVATION_URL, value: "http://station-reservation:8000" }
             - { name: BILLING_URL, value: "http://billing-wallet:8000" }
             - { name: DISPATCH_URL, value: "http://energy-dispatch:8000" }
+            {{- if eq $g.authMode "dev" }}
+            - { name: IDENTITY_TABLE, value: "aegisvolt-identity-{{ $g.environment }}" }
+            - { name: BOOTSTRAP_ADMIN_EMAIL, value: {{ $g.bootstrapAdminEmail | quote }} }
+            - name: BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: aegisvolt-identity, key: bootstrap-admin-password } }
+            - name: JWT_PRIVATE_KEY
+              valueFrom: { secretKeyRef: { name: aegisvolt-identity, key: jwt-private-key } }
+            {{- end }}
             {{- end }}
             {{- range $k, $v := $svc.env }}
             - { name: {{ $k }}, value: {{ $v | quote }} }

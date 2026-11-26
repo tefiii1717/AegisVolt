@@ -4,7 +4,7 @@ window.__AEGIS_CONFIG__ = {
   environment: 'local',
   graphqlUrl: 'http://localhost:4000/graphql',
   authMode: 'dev',
-  devTokenUrl: 'http://localhost:4000/auth/dev-token',
+  authUrl: 'http://localhost:4000/auth',
   cognitoDomain: '',
   cognitoClientId: '',
   redirectUri: 'http://localhost:5173/',

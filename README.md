@@ -15,6 +15,7 @@ iniciar. Si algo falla, una **SAGA orquestada** reembolsa y libera la bahía aut
 | [03 · Design Thinking](docs/03-design-thinking.md) | Personas, punto de vista, ideación, pruebas |
 | [04 · Guía de sustentación](docs/04-guia-sustentacion.md) | Respuestas y demos para cada pregunta del banco §6 |
 | [05 · Floci](docs/05-floci-local.md) | Los tres ambientes en el emulador local, CI/CD y diferencias con AWS |
+| [06 · Identidad y facturación](docs/06-identidad-y-facturacion.md) | Roles por dominio de correo, medios de pago y facturas |
 
 ## Estructura
 
@@ -43,15 +44,15 @@ Requisitos: Docker con Compose v2.
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml up -d --build
-# Consola web:   http://127.0.0.1:5173   (elige un rol de prueba)
+# Consola web:   http://127.0.0.1:5173   (crea una cuenta @operador; admin inicial: admin@admin.aegisvolt.co / AegisLocal2026)
 # GraphiQL:      http://localhost:4000/graphql
 # Floci (AWS):   http://localhost:4566/_floci/ui
 # Prefect:       docker compose -f deploy/compose/docker-compose.yml --profile observability up -d → http://localhost:4200
 ```
 
 Demos rápidas:
-- **Rollback de la SAGA:** Feature flags → activar *Simular falla física del cargador* → Reservar carga.
-- **Fondos insuficientes:** reservar con la flota *Café Express* y 80 kWh.
+- **Rollback de la SAGA:** como administrador, Feature flags → activar *Simular falla física del cargador*; luego, como operador, Reservar carga.
+- **Cupo insuficiente:** reservar 200 kWh varias veces seguidas con el mismo medio de pago hasta agotar su cupo.
 - **Circuit breaker:** `curl -X POST localhost:8090/admin/chaos -H 'content-type: application/json' -d '{"failure_rate":1}'`
   y reservar tres veces; la tercera se compensa sin llamar al legado (Plataforma → circuito abierto).
 

@@ -20,6 +20,12 @@ export const config = {
     billing: env.BILLING_URL ?? 'http://billing-wallet:8000',
     dispatch: env.DISPATCH_URL ?? 'http://energy-dispatch:8000',
   },
+  // Proveedor de identidad local (AUTH_MODE=dev): tabla de usuarios y llave de firma compartida
+  // por todas las réplicas (Secret de Kubernetes). Sin llave, cada proceso genera una efímera.
+  identityTable: env.IDENTITY_TABLE ?? `aegisvolt-identity-${env.AEGIS_ENV ?? 'local'}`,
+  dynamodbEndpoint: env.DYNAMODB_ENDPOINT ?? '',
+  jwtPrivateKeyPem: env.JWT_PRIVATE_KEY ?? '',
+  bootstrapAdmin: { email: env.BOOTSTRAP_ADMIN_EMAIL ?? '', password: env.BOOTSTRAP_ADMIN_PASSWORD ?? '' },
   httpTimeoutMs: Number(env.HTTP_TIMEOUT_MS ?? 2500),
   maxQueryDepth: Number(env.MAX_QUERY_DEPTH ?? 8),
 };

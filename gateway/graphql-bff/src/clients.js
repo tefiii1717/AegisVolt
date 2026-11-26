@@ -61,6 +61,7 @@ export const services = {
   orchestrator: client('saga-orchestrator', config.urls.orchestrator),
   legacy: client('legacy-csms', config.urls.legacy),
   flags: client('flags-admin', config.urls.flags),
+  billing: client('billing-wallet', config.urls.billing),
 };
 
 export function breakerState(b) {

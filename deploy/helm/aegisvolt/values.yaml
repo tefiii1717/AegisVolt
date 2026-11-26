@@ -11,7 +11,8 @@ global:
   cognitoIssuer: ""
   cognitoClientIds: ""
   corsOrigins: ""
-  authMode: cognito          # dev = emisor de tokens del BFF (solo local/dev/test; prohibido en prod)
+  authMode: cognito          # dev = proveedor de identidad local del BFF (solo local/dev/test; prohibido en prod)
+  bootstrapAdminEmail: admin@admin.aegisvolt.co   # administrador inicial (solo authMode=dev); la clave va en un Secret
   awsEndpoint: ""            # Floci visto desde el clúster (p. ej. http://host.k3d.internal:4566); vacío = AWS real
   canary:
     provider: web            # web (Floci y AWS) | cloudwatch (solo AWS real)

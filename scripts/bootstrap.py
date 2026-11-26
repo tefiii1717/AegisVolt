@@ -20,7 +20,7 @@ from aegis_common.dynamo import create_service_table, make_client, to_ddb
 from aegis_common.topics import ALL_TOPICS
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICE_TABLES = ("reservations", "billing", "dispatch", "sagas", "readmodel", "feature-flags")
+SERVICE_TABLES = ("reservations", "billing", "dispatch", "sagas", "readmodel", "feature-flags", "identity")
 
 
 def table(name: str, env: str) -> str:

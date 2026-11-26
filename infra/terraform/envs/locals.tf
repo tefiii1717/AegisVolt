@@ -71,6 +71,7 @@ locals {
     "energy-dispatch"     = ["dispatch"]
     "saga-orchestrator"   = ["sagas"]
     "query-projection"    = ["readmodel"]
+    "graphql-bff"         = ["identity"]
   }
 }
 
